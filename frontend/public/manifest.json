@@ -1,0 +1,9 @@
+{
+  "short_name": "Coach Brain",
+  "name": "Coach Brain Swim Planner Pro",
+  "description": "Local-first swim workout and season planning for coaches.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#003366"
+}

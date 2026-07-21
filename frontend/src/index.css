@@ -1,0 +1,123 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+    --swim-bg: #FFFFFF;
+    --swim-surface: #F1F5F9;
+    --swim-primary: #003366;
+    --swim-primary-hover: #002244;
+    --swim-accent: #00E5FF;
+    --swim-text: #0F172A;
+    --swim-muted: #475569;
+    --swim-border: #CBD5E1;
+}
+
+html,
+body {
+    margin: 0;
+    background: var(--swim-bg);
+    color: var(--swim-text);
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+.font-display {
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.label-eyebrow {
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    color: var(--swim-muted);
+}
+
+/* Tile selector */
+.tile {
+    border: 1px solid var(--swim-border);
+    background: #fff;
+    color: var(--swim-text);
+    padding: 1rem 1rem;
+    text-align: left;
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    transition:
+        background-color 150ms ease,
+        color 150ms ease,
+        border-color 150ms ease,
+        transform 150ms ease;
+    cursor: pointer;
+    border-radius: 2px;
+    line-height: 1.1;
+    text-transform: capitalize;
+    min-height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    width: 100%;
+}
+
+.tile:hover {
+    transform: translateY(-2px);
+    border-color: var(--swim-primary);
+}
+
+.tile:active {
+    transform: scale(0.97);
+}
+
+.tile[data-active='true'] {
+    background: var(--swim-primary);
+    color: #fff;
+    border-color: var(--swim-primary);
+}
+
+.tile[data-active='true']:hover {
+    background: var(--swim-primary-hover);
+    border-color: var(--swim-primary-hover);
+}
+
+/* Reset App.css remnants so old template doesn't bleed in */
+.App {
+    min-height: 100vh;
+    background: var(--swim-bg);
+}
+
+@layer base {
+    :root {
+        --background: 0 0% 100%;
+        --foreground: 222 47% 11%;
+        --card: 0 0% 100%;
+        --card-foreground: 222 47% 11%;
+        --popover: 0 0% 100%;
+        --popover-foreground: 222 47% 11%;
+        --primary: 213 100% 20%;
+        --primary-foreground: 0 0% 100%;
+        --secondary: 210 40% 96%;
+        --secondary-foreground: 222 47% 11%;
+        --muted: 210 40% 96%;
+        --muted-foreground: 215 16% 47%;
+        --accent: 187 100% 50%;
+        --accent-foreground: 222 47% 11%;
+        --destructive: 0 84% 60%;
+        --destructive-foreground: 0 0% 100%;
+        --border: 215 20% 80%;
+        --input: 215 20% 80%;
+        --ring: 213 100% 20%;
+        --radius: 0.125rem;
+    }
+}
+
+@layer base {
+    * {
+        @apply border-border;
+    }
+    body {
+        @apply bg-background text-foreground;
+    }
+}
