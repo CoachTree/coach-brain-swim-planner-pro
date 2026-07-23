@@ -48,7 +48,7 @@ export default function PaceCalculator({ unit = "m", onChange }) {
   return (
     <div data-testid="pace-calculator-wrapper">
       <div className="flex items-center justify-between mb-3">
-        <span className="label-eyebrow">09 · Pace calculator (optional)</span>
+        <span className="label-eyebrow">12 · Pace calculator (optional)</span>
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}

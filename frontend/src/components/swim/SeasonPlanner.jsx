@@ -126,9 +126,15 @@ export default function SeasonPlanner() {
 
   const handleCopy = async () => {
     if (!plan) return;
-    await navigator.clipboard.writeText(copySeasonPlanText(plan));
-    toast.success("Season plan copied");
+    try {
+      await navigator.clipboard.writeText(copySeasonPlanText(plan));
+      toast.success("Season plan copied");
+    } catch {
+      toast.error("Could not copy season plan");
+    }
   };
+
+  const volumeUnit = poolLength === "yards" ? "yd" : "m";
 
   return (
     <div data-testid="season-planner-page">
@@ -339,7 +345,7 @@ export default function SeasonPlanner() {
                     </div>
                     <div className="text-right">
                       <div className="label-eyebrow">Est. load</div>
-                      <div className="font-display font-black text-[#0F172A]">{week.estimatedWeeklyVolume}m</div>
+                      <div className="font-display font-black text-[#0F172A]">{week.estimatedWeeklyVolume}{volumeUnit}</div>
                     </div>
                   </div>
 

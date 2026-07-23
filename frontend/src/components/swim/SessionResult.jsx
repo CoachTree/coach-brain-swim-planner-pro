@@ -10,11 +10,12 @@ import {
   Plus,
   X,
   Star,
+  Save,
 } from "lucide-react";
 import { jsPDF } from "jspdf";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Favourites } from "@/lib/localStore";
+import { Favourites, SavedSessions } from "@/lib/localStore";
 import JournalPanel from "@/components/swim/JournalPanel";
 import { encodeShare, SHARE_TTL_DAYS } from "@/lib/shareLink";
 
@@ -116,16 +117,23 @@ function exportPdf(session, profile) {
   doc.setFont("helvetica", "normal");
   doc.setFontSize(13);
   const totalM = session.total_distance_m || profile.distance;
+  const sessionTitle = session.summary || `${totalM} ${u} ${profile.goal || "training session"}`;
   const metaLines = [
+    `Session title: ${sessionTitle}`,
+    `Athlete: ${profile.athleteName || "Manual profile"}`,
     `Date: ${formatDate()}`,
+    `Goal: ${profile.goal || "Not specified"}`,
     `Total distance: ${totalM} ${u}`,
     `Age: ${profile.age}    Level: ${profile.level}    Stroke: ${profile.stroke}`,
-    `Goal: ${profile.goal}    Intensity: ${profile.intensity}    Pool: ${profile.poolType}`,
+    `Intensity: ${profile.intensity}    Pool: ${profile.poolType}`,
   ];
   metaLines.forEach((line) => {
-    ensureSpace(18);
-    doc.text(line, marginX, y);
-    y += 18;
+    const wrapped = doc.splitTextToSize(line, contentW);
+    ensureSpace(18 * wrapped.length);
+    wrapped.forEach((part) => {
+      doc.text(part, marginX, y);
+      y += 18;
+    });
   });
   y += 8;
 
@@ -344,6 +352,18 @@ export default function SessionResult({
     toast.success("Saved to favourites");
   };
 
+  const handleSaveSession = () => {
+    const defaultName = `${session.total_distance_m || profile.distance} ${profile.unit || "m"} · ${profile.stroke} · ${profile.intensity}`;
+    const name = window.prompt("Name this saved session", defaultName);
+    if (!name?.trim()) return;
+    SavedSessions.upsert({
+      name: name.trim(),
+      session,
+      profile,
+    });
+    toast.success("Session saved");
+  };
+
   // ---- edit helpers ----
   const updateItem = useCallback((blockKey, idx, val) => {
     setSession((s) => {
@@ -425,6 +445,15 @@ export default function SessionResult({
         <div className="flex flex-wrap gap-2">
           {!readOnly && (
             <Button
+              onClick={handleSaveSession}
+              data-testid="save-session-button"
+              className="h-11 rounded-sm bg-[#00E5FF] text-[#003366] hover:bg-white font-display font-bold tracking-wide"
+            >
+              <Save className="h-4 w-4 mr-2" /> Save Session
+            </Button>
+          )}
+          {!readOnly && (
+            <Button
               onClick={handleFavourite}
               data-testid="favourite-button"
               className="h-11 rounded-sm bg-white/10 hover:bg-white/20 text-white border border-white/30 font-display font-bold tracking-wide"
@@ -484,7 +513,7 @@ export default function SessionResult({
             data-testid="export-pdf-button"
             className="h-11 rounded-sm bg-white text-[#003366] hover:bg-[#F1F5F9] font-display font-bold tracking-wide"
           >
-            <FileDown className="h-4 w-4 mr-2" /> PDF
+            <FileDown className="h-4 w-4 mr-2" /> Export PDF
           </Button>
           <Button
             onClick={handleCopy}

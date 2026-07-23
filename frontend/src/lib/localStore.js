@@ -6,6 +6,8 @@
  *
  * Schema (versioned namespace `swim:v1:*`):
  *   swim:v1:coach_id   -> string uuid (stable per browser)
+ *   swim:v1:athletes   -> [Athlete]
+ *   swim:v1:sessions   -> [SavedSession]
  *   swim:v1:favourites -> [FavouriteSession]
  *   swim:v1:test_sets  -> [TestSet]
  *   swim:v1:journal    -> [JournalEntry]
@@ -20,6 +22,8 @@
 const NS = "swim:v1";
 const KEYS = {
   coachId: `${NS}:coach_id`,
+  athletes: `${NS}:athletes`,
+  sessions: `${NS}:sessions`,
   favourites: `${NS}:favourites`,
   testSets: `${NS}:test_sets`,
   journal: `${NS}:journal`,
@@ -127,6 +131,8 @@ function makeCollection(storageKey) {
 }
 
 export const Favourites = makeCollection(KEYS.favourites);
+export const Athletes = makeCollection(KEYS.athletes);
+export const SavedSessions = makeCollection(KEYS.sessions);
 export const TestSets = makeCollection(KEYS.testSets);
 export const Journal = makeCollection(KEYS.journal);
 
@@ -136,6 +142,8 @@ export function exportCoachData() {
     schema: NS,
     exported_at: nowIso(),
     coach_id: getCoachId(),
+    athletes: readArr(KEYS.athletes),
+    sessions: readArr(KEYS.sessions),
     favourites: readArr(KEYS.favourites),
     test_sets: readArr(KEYS.testSets),
     journal: readArr(KEYS.journal),
@@ -143,16 +151,25 @@ export function exportCoachData() {
 }
 
 export function importCoachData(payload) {
-  if (!payload || typeof payload !== "object") {
+  if (
+    !payload ||
+    typeof payload !== "object" ||
+    payload.app !== "Coach Brain Swim Planner" ||
+    typeof payload.schema !== "string"
+  ) {
     throw new Error("Invalid backup file");
   }
 
   const next = {
+    athletes: Array.isArray(payload.athletes) ? payload.athletes : [],
+    sessions: Array.isArray(payload.sessions) ? payload.sessions : [],
     favourites: Array.isArray(payload.favourites) ? payload.favourites : [],
     testSets: Array.isArray(payload.test_sets) ? payload.test_sets : [],
     journal: Array.isArray(payload.journal) ? payload.journal : [],
   };
 
+  writeArr(KEYS.athletes, next.athletes);
+  writeArr(KEYS.sessions, next.sessions);
   writeArr(KEYS.favourites, next.favourites);
   writeArr(KEYS.testSets, next.testSets);
   writeArr(KEYS.journal, next.journal);
@@ -166,6 +183,8 @@ export function importCoachData(payload) {
   }
 
   return {
+    athletes: next.athletes.length,
+    sessions: next.sessions.length,
     favourites: next.favourites.length,
     test_sets: next.testSets.length,
     journal: next.journal.length,

@@ -9,7 +9,10 @@ import PaceCalculator from "@/components/swim/PaceCalculator";
 import EquipmentSelector from "@/components/swim/EquipmentSelector";
 import CoachLibrary from "@/components/swim/CoachLibrary";
 import SeasonPlanner from "@/components/swim/SeasonPlanner";
+import AthleteProfile from "@/components/swim/AthleteProfile";
+import SessionHistory from "@/components/swim/SessionHistory";
 import { generateSession } from "@/lib/sessionGenerator";
+import { Athletes } from "@/lib/localStore";
 
 const MIN_AGE = 4;
 const MAX_AGE = 99;
@@ -45,6 +48,8 @@ const SESSION_ROLE_LABELS = {
 
 export default function SwimPlanner() {
   const [activeTab, setActiveTab] = useState("session");
+  const [athletes, setAthletes] = useState(() => Athletes.list());
+  const [selectedAthleteId, setSelectedAthleteId] = useState("");
   const [age, setAge] = useState(DEFAULT_AGE);
   const [level, setLevel] = useState("intermediate");
   const [stroke, setStroke] = useState("freestyle");
@@ -62,6 +67,36 @@ export default function SwimPlanner() {
   const [originalSession, setOriginalSession] = useState(null);
   const [loadedFavouriteId, setLoadedFavouriteId] = useState(null);
 
+  const restoreProfile = (savedProfile = {}) => {
+    if (typeof savedProfile.age !== "undefined") setAge(savedProfile.age);
+    if (savedProfile.level) setLevel(savedProfile.level);
+    if (savedProfile.stroke) setStroke(savedProfile.stroke);
+    if (savedProfile.goal) setGoal(savedProfile.goal);
+    if (typeof savedProfile.distance !== "undefined") setDistance(savedProfile.distance);
+    if (savedProfile.intensity) setIntensity(savedProfile.intensity);
+    if (savedProfile.sessionRole) setSessionRole(savedProfile.sessionRole);
+    if (savedProfile.unit) setUnit(savedProfile.unit);
+    if (typeof savedProfile.includeSprintFinisher !== "undefined") {
+      setIncludeSprintFinisher(Boolean(savedProfile.includeSprintFinisher));
+    }
+    if (savedProfile.poolType) {
+      setPoolSize(savedProfile.poolType.startsWith("50") ? "50" : "25");
+    }
+    setSelectedAthleteId(savedProfile.athleteId || "");
+  };
+
+  const handleLoadFavourite = (fav) => {
+    restoreProfile(fav.profile);
+    setOriginalSession(fav.session);
+    setLoadedFavouriteId(fav.id);
+    setActiveTab("session");
+    setTimeout(() => {
+      document
+        .getElementById("session-result")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+  };
+
   const ageValid = useMemo(
     () => Number(age) >= MIN_AGE && Number(age) <= MAX_AGE,
     [age],
@@ -73,6 +108,8 @@ export default function SwimPlanner() {
 
   const profile = useMemo(
     () => ({
+      athleteId: selectedAthleteId || undefined,
+      athleteName: athletes.find((athlete) => athlete.id === selectedAthleteId)?.name,
       age,
       level,
       stroke,
@@ -84,8 +121,44 @@ export default function SwimPlanner() {
       includeSprintFinisher,
       sessionRole,
     }),
-    [age, level, stroke, goal, distance, intensity, poolTypeLabel, unit, includeSprintFinisher, sessionRole],
+    [age, athletes, level, stroke, goal, distance, intensity, poolTypeLabel, unit, includeSprintFinisher, sessionRole, selectedAthleteId],
   );
+
+  const handleSelectAthlete = (athlete) => {
+    if (!athlete) {
+      setSelectedAthleteId("");
+      return;
+    }
+    setSelectedAthleteId(athlete.id);
+    if (athlete.age !== "" && Number(athlete.age) >= MIN_AGE && Number(athlete.age) <= MAX_AGE) {
+      setAge(athlete.age);
+    }
+    if (STROKES.includes(athlete.mainStroke)) setStroke(athlete.mainStroke);
+    setActiveTab("session");
+    toast.success(`Selected ${athlete.name}`);
+  };
+
+  const handleLoadSavedSession = (saved) => {
+    const savedProfile = saved.profile || {};
+    if (typeof savedProfile.age !== "undefined") setAge(savedProfile.age);
+    if (savedProfile.level) setLevel(savedProfile.level);
+    if (savedProfile.stroke) setStroke(savedProfile.stroke);
+    if (savedProfile.goal) setGoal(savedProfile.goal);
+    if (typeof savedProfile.distance !== "undefined") setDistance(savedProfile.distance);
+    if (savedProfile.intensity) setIntensity(savedProfile.intensity);
+    if (savedProfile.sessionRole) setSessionRole(savedProfile.sessionRole);
+    if (savedProfile.unit) setUnit(savedProfile.unit);
+    if (typeof savedProfile.includeSprintFinisher !== "undefined") setIncludeSprintFinisher(Boolean(savedProfile.includeSprintFinisher));
+    if (savedProfile.poolType) setPoolSize(savedProfile.poolType.startsWith("50") ? "50" : "25");
+    setSelectedAthleteId(savedProfile.athleteId || "");
+    setOriginalSession(saved.session);
+    setLoadedFavouriteId(null);
+    setActiveTab("session");
+    toast.success(`Opened "${saved.name}"`);
+    setTimeout(() => {
+      document.getElementById("session-result")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+  };
 
   const handleGenerate = async () => {
     if (!ageValid) {
@@ -164,11 +237,13 @@ export default function SwimPlanner() {
       </header>
 
       <main className="max-w-2xl mx-auto w-full px-4 sm:px-6 py-10 sm:py-14">
-        <div className="mb-8 grid grid-cols-3 border border-[#CBD5E1] rounded-sm overflow-hidden">
+        <div className="mb-8 grid grid-cols-2 sm:grid-cols-5 border border-[#CBD5E1] rounded-sm overflow-hidden">
           {[
             ["session", "Session Builder"],
             ["season", "Season Planner"],
             ["library", "Coach Library"],
+            ["athletes", "Athletes"],
+            ["history", "Session History"],
           ].map(([key, label]) => (
             <button
               key={key}
@@ -190,7 +265,7 @@ export default function SwimPlanner() {
             className="font-display text-4xl sm:text-5xl lg:text-6xl font-black tracking-tighter text-[#0F172A] leading-[0.95]"
             data-testid="hero-heading"
           >
-            Plan a swim set
+            Coach Brain
             <br />
             <span className="text-[#003366]">in seconds.</span>
           </h2>
@@ -201,8 +276,25 @@ export default function SwimPlanner() {
         </div>
 
         <section className="space-y-10">
+          <div data-testid="athlete-session-selector">
+            <label className="label-eyebrow block mb-3" htmlFor="session-athlete">01 · Athlete</label>
+            {athletes.length > 0 ? (
+              <select
+                id="session-athlete"
+                value={selectedAthleteId}
+                onChange={(event) => handleSelectAthlete(athletes.find((athlete) => athlete.id === event.target.value) || null)}
+                className="flex h-14 w-full rounded-sm border border-[#CBD5E1] bg-white px-4 text-base font-display font-bold"
+                data-testid="session-athlete-select"
+              >
+                <option value="">Manual profile / no athlete selected</option>
+                {athletes.map((athlete) => <option key={athlete.id} value={athlete.id}>{athlete.name}{athlete.team ? ` · ${athlete.team}` : ""}</option>)}
+              </select>
+            ) : (
+              <button type="button" onClick={() => setActiveTab("athletes")} className="w-full border border-dashed border-[#CBD5E1] p-4 text-left text-sm text-[#475569] hover:border-[#003366] hover:text-[#003366]">No athlete profiles yet. Add one in Athletes.</button>
+            )}
+          </div>
           <div data-testid="field-age">
-            <label className="label-eyebrow block mb-3">01 · Swimmer age</label>
+            <label className="label-eyebrow block mb-3">02 · Swimmer age</label>
             <Input
               type="number"
               min={MIN_AGE}
@@ -221,7 +313,7 @@ export default function SwimPlanner() {
           </div>
 
           <TileGroup
-            label="02 · Level"
+            label="03 · Level"
             options={LEVELS}
             value={level}
             onChange={setLevel}
@@ -230,7 +322,7 @@ export default function SwimPlanner() {
           />
 
           <TileGroup
-            label="03 · Main stroke"
+            label="04 · Main stroke"
             options={STROKES}
             value={stroke}
             onChange={setStroke}
@@ -240,7 +332,7 @@ export default function SwimPlanner() {
           />
 
           <TileGroup
-            label="04 · Goal"
+            label="05 · Goal"
             options={GOALS}
             value={goal}
             onChange={setGoal}
@@ -249,7 +341,7 @@ export default function SwimPlanner() {
           />
 
           <TileGroup
-            label={`05 · Total distance (${unit})`}
+            label={`06 · Total distance (${unit})`}
             options={DISTANCES}
             value={distance}
             onChange={setDistance}
@@ -259,7 +351,7 @@ export default function SwimPlanner() {
           />
 
           <TileGroup
-            label="06 · Intensity"
+            label="07 · Intensity"
             options={INTENSITIES}
             value={intensity}
             onChange={setIntensity}
@@ -269,7 +361,7 @@ export default function SwimPlanner() {
           />
 
           <TileGroup
-            label="07 · Season phase / session role"
+            label="08 · Season phase / session role"
             options={SESSION_ROLES}
             value={sessionRole}
             onChange={setSessionRole}
@@ -279,7 +371,7 @@ export default function SwimPlanner() {
           />
 
           <TileGroup
-            label="08 · Pool type"
+            label="09 · Pool type"
             options={POOL_SIZES}
             value={poolSize}
             onChange={setPoolSize}
@@ -289,13 +381,13 @@ export default function SwimPlanner() {
           />
 
           <EquipmentSelector
-            label="09 · Power equipment (optional)"
+            label="10 · Power equipment (optional)"
             value={equipment}
             onChange={setEquipment}
           />
 
           <TileGroup
-            label="10 · Sprint finisher after main set"
+            label="11 · Sprint finisher after main set"
             options={[false, true]}
             value={includeSprintFinisher}
             onChange={setIncludeSprintFinisher}
@@ -345,33 +437,7 @@ export default function SwimPlanner() {
 
         <div className="mt-14">
           <CoachLibrary
-            onLoadFavourite={(fav) => {
-              // restore profile fields where we can
-              if (fav.profile) {
-                if (typeof fav.profile.age !== "undefined") setAge(fav.profile.age);
-                if (fav.profile.level) setLevel(fav.profile.level);
-                if (fav.profile.stroke) setStroke(fav.profile.stroke);
-                if (fav.profile.goal) setGoal(fav.profile.goal);
-                if (typeof fav.profile.distance !== "undefined")
-                  setDistance(fav.profile.distance);
-                if (fav.profile.intensity) setIntensity(fav.profile.intensity);
-                if (fav.profile.sessionRole) setSessionRole(fav.profile.sessionRole);
-                if (fav.profile.unit) setUnit(fav.profile.unit);
-                if (typeof fav.profile.includeSprintFinisher !== "undefined") setIncludeSprintFinisher(Boolean(fav.profile.includeSprintFinisher));
-                if (fav.profile.poolType) {
-                  const size = fav.profile.poolType.startsWith("50") ? "50" : "25";
-                  setPoolSize(size);
-                }
-              }
-              setOriginalSession(fav.session);
-              setLoadedFavouriteId(fav.id);
-              setActiveTab("session");
-              setTimeout(() => {
-                document
-                  .getElementById("session-result")
-                  ?.scrollIntoView({ behavior: "smooth", block: "start" });
-              }, 80);
-            }}
+            onLoadFavourite={handleLoadFavourite}
           />
         </div>
           </>
@@ -380,35 +446,22 @@ export default function SwimPlanner() {
         {activeTab === "season" && <SeasonPlanner />}
 
         {activeTab === "library" && (
-          <CoachLibrary
-            onLoadFavourite={(fav) => {
-              // restore profile fields where we can
-              if (fav.profile) {
-                if (typeof fav.profile.age !== "undefined") setAge(fav.profile.age);
-                if (fav.profile.level) setLevel(fav.profile.level);
-                if (fav.profile.stroke) setStroke(fav.profile.stroke);
-                if (fav.profile.goal) setGoal(fav.profile.goal);
-                if (typeof fav.profile.distance !== "undefined")
-                  setDistance(fav.profile.distance);
-                if (fav.profile.intensity) setIntensity(fav.profile.intensity);
-                if (fav.profile.sessionRole) setSessionRole(fav.profile.sessionRole);
-                if (fav.profile.unit) setUnit(fav.profile.unit);
-                if (typeof fav.profile.includeSprintFinisher !== "undefined") setIncludeSprintFinisher(Boolean(fav.profile.includeSprintFinisher));
-                if (fav.profile.poolType) {
-                  const size = fav.profile.poolType.startsWith("50") ? "50" : "25";
-                  setPoolSize(size);
-                }
-              }
-              setOriginalSession(fav.session);
-              setLoadedFavouriteId(fav.id);
-              setActiveTab("session");
-              setTimeout(() => {
-                document
-                  .getElementById("session-result")
-                  ?.scrollIntoView({ behavior: "smooth", block: "start" });
-              }, 80);
+          <CoachLibrary onLoadFavourite={handleLoadFavourite} />
+        )}
+
+        {activeTab === "athletes" && (
+          <AthleteProfile
+            selectedAthleteId={selectedAthleteId}
+            onAthletesChange={() => setAthletes(Athletes.list())}
+            onSelectAthlete={(athlete) => {
+              setAthletes(Athletes.list());
+              handleSelectAthlete(athlete);
             }}
           />
+        )}
+
+        {activeTab === "history" && (
+          <SessionHistory onOpen={handleLoadSavedSession} />
         )}
       </main>
 
