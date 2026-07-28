@@ -18,6 +18,8 @@ core product.
 - Coach Library backup and restore via JSON export/import.
 - PDF export, plain-text copy, and URL-hash share links.
 - Meter and yard modes.
+- Community MVP: evidence cards, structured local replications, useful votes,
+  and an AI Debate framework focused on reproducibility rather than authority.
 - Static hosting support through `frontend/build`.
 
 ## Low-Budget Business Model
@@ -73,6 +75,14 @@ that support Netlify-style SPA redirects.
 
 No environment variables are required for the production frontend. The app does
 not need an AI key, database URL, or API server.
+
+## Community MVP
+
+The Community tab is intentionally local-first in this package: contributions
+remain in the current browser and demo evidence is seeded. A global community
+requires consent, identity, moderation, privacy, and evidence provenance before
+it should accept live data. See `COMMUNITY_MVP_JA.md` for the Japanese product
+and implementation notes.
 
 ## Delivery Checklist
 

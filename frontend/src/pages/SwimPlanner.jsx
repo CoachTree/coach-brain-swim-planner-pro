@@ -11,6 +11,7 @@ import CoachLibrary from "@/components/swim/CoachLibrary";
 import SeasonPlanner from "@/components/swim/SeasonPlanner";
 import AthleteProfile from "@/components/swim/AthleteProfile";
 import SessionHistory from "@/components/swim/SessionHistory";
+import CommunityHub from "@/components/swim/CommunityHub";
 import { generateSession } from "@/lib/sessionGenerator";
 import { Athletes } from "@/lib/localStore";
 
@@ -237,13 +238,14 @@ export default function SwimPlanner() {
       </header>
 
       <main className="max-w-2xl mx-auto w-full px-4 sm:px-6 py-10 sm:py-14">
-        <div className="mb-8 grid grid-cols-2 sm:grid-cols-5 border border-[#CBD5E1] rounded-sm overflow-hidden">
+        <div className="mb-8 grid grid-cols-2 sm:grid-cols-3 border border-[#CBD5E1] rounded-sm overflow-hidden">
           {[
             ["session", "Session Builder"],
             ["season", "Season Planner"],
             ["library", "Coach Library"],
             ["athletes", "Athletes"],
             ["history", "Session History"],
+            ["community", "Community"],
           ].map(([key, label]) => (
             <button
               key={key}
@@ -463,6 +465,8 @@ export default function SwimPlanner() {
         {activeTab === "history" && (
           <SessionHistory onOpen={handleLoadSavedSession} />
         )}
+
+        {activeTab === "community" && <CommunityHub />}
       </main>
 
       <footer className="border-t border-[#CBD5E1] mt-10">
