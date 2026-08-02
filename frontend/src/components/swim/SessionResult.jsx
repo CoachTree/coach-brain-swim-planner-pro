@@ -317,7 +317,7 @@ export default function SessionResult({
     setSharing(true);
     try {
       const encoded = encodeShare({ session, profile });
-      const url = `${window.location.origin}/s#${encoded}`;
+      const url = `${window.location.origin}${window.location.pathname}#/s?data=${encoded}`;
       try {
         await navigator.clipboard.writeText(url);
         toast.success("Copied share link", {

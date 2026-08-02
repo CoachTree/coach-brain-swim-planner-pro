@@ -15,7 +15,7 @@ export default function SharedSession() {
 
   useEffect(() => {
     try {
-      const hash = window.location.hash.replace(/^#/, "");
+      const hash = new URLSearchParams(window.location.hash.split("?")[1] || "").get("data");
       if (!hash) {
         setState({ loading: false, data: null, error: "No shared session in this URL." });
         return;
