@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Waves, ArrowDown } from "lucide-react";
+import { Loader2, Waves, ArrowDown, LockKeyhole, Sparkles } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import TileGroup from "@/components/swim/TileGroup";
@@ -28,6 +28,7 @@ const INTENSITIES = ["recovery", "easy", "moderate", "hard", "race pace"];
 const SESSION_ROLES = ["standalone", "preparation", "build kick/pull emphasis", "intensive", "race specific", "taper", "race week"];
 const POOL_SIZES = ["25", "50"];
 const UNITS = ["m", "yd"];
+const GUMROAD_URL = "https://sakuraiyuji.gumroad.com/l/coach-brain-pro";
 
 const INTENSITY_LABELS = {
   recovery: "1 · Recovery",
@@ -46,6 +47,30 @@ const SESSION_ROLE_LABELS = {
   taper: "Taper",
   "race week": "Race week",
 };
+
+function ProGate({ feature }) {
+  return (
+    <section className="border border-[#CBD5E1] bg-[#F8FAFC] p-7 sm:p-9 text-center">
+      <div className="mx-auto flex h-11 w-11 items-center justify-center bg-[#003366] text-[#00E5FF]">
+        <LockKeyhole className="h-5 w-5" />
+      </div>
+      <div className="label-eyebrow mt-5">Coach Brain Pro</div>
+      <h2 className="mt-2 font-display text-3xl font-black text-[#0F172A]">{feature} is a Pro feature</h2>
+      <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-[#475569]">
+        The free version lets coaches build sessions and explore Community. Pro adds planning, saved coaching work, and athlete workflow tools.
+      </p>
+      <a
+        href={GUMROAD_URL}
+        target="_blank"
+        rel="noreferrer"
+        className="mt-6 inline-flex items-center gap-2 bg-[#003366] px-5 py-3 text-sm font-bold text-white hover:bg-[#002244]"
+      >
+        <Sparkles className="h-4 w-4" /> Founding Coach Early Access · US$39
+      </a>
+      <p className="mt-3 text-xs text-[#64748B]">First 25 coaches · regular price US$59</p>
+    </section>
+  );
+}
 
 export default function SwimPlanner() {
   const [activeTab, setActiveTab] = useState("session");
@@ -67,6 +92,16 @@ export default function SwimPlanner() {
   const [loading, setLoading] = useState(false);
   const [originalSession, setOriginalSession] = useState(null);
   const [loadedFavouriteId, setLoadedFavouriteId] = useState(null);
+  const freeTabs = new Set(["session", "community"]);
+
+  const selectTab = (key) => {
+    if (!freeTabs.has(key)) {
+      setActiveTab("upgrade");
+      toast.info("This is a Coach Brain Pro feature");
+      return;
+    }
+    setActiveTab(key);
+  };
 
   const restoreProfile = (savedProfile = {}) => {
     if (typeof savedProfile.age !== "undefined") setAge(savedProfile.age);
@@ -216,6 +251,13 @@ export default function SwimPlanner() {
               </h1>
             </div>
           </div>
+          <button
+            type="button"
+            onClick={() => setActiveTab("upgrade")}
+            className="hidden sm:inline-flex items-center gap-2 border border-[#003366] px-3 py-2 text-xs font-bold text-[#003366] hover:bg-[#003366] hover:text-white"
+          >
+            <LockKeyhole className="h-3.5 w-3.5" /> Free plan
+          </button>
           {/* Unit toggle */}
           <div
             className="flex items-center border border-[#CBD5E1] rounded-sm overflow-hidden"
@@ -240,21 +282,21 @@ export default function SwimPlanner() {
       <main className="max-w-2xl mx-auto w-full px-4 sm:px-6 py-10 sm:py-14">
         <div className="mb-8 grid grid-cols-2 sm:grid-cols-3 border border-[#CBD5E1] rounded-sm overflow-hidden">
           {[
-            ["session", "Session Builder"],
-            ["season", "Season Planner"],
-            ["library", "Coach Library"],
-            ["athletes", "Athletes"],
-            ["history", "Session History"],
-            ["community", "Community"],
-          ].map(([key, label]) => (
+            ["session", "Session Builder", false],
+            ["season", "Season Planner", true],
+            ["library", "Coach Library", true],
+            ["athletes", "Athletes", true],
+            ["history", "Session History", true],
+            ["community", "Community", false],
+          ].map(([key, label, isPro]) => (
             <button
               key={key}
               type="button"
-              onClick={() => setActiveTab(key)}
+              onClick={() => selectTab(key)}
               data-active={activeTab === key}
               className="px-3 py-3 text-xs sm:text-sm font-display font-black tracking-wide border-r last:border-r-0 border-[#CBD5E1] data-[active=true]:bg-[#003366] data-[active=true]:text-white text-[#475569] hover:text-[#003366]"
             >
-              {label}
+              <span className="inline-flex items-center gap-1">{label}{isPro && <LockKeyhole className="h-3 w-3" />}</span>
             </button>
           ))}
         </div>
@@ -433,40 +475,26 @@ export default function SwimPlanner() {
               originalSession={originalSession}
               profile={profile}
               defaultFavouriteId={loadedFavouriteId}
+              isPro={false}
             />
           )}
         </div>
 
-        <div className="mt-14">
-          <CoachLibrary
-            onLoadFavourite={handleLoadFavourite}
-          />
-        </div>
+        <div className="mt-14"><ProGate feature="Coach Library" /></div>
           </>
         )}
 
         {activeTab === "season" && <SeasonPlanner />}
 
-        {activeTab === "library" && (
-          <CoachLibrary onLoadFavourite={handleLoadFavourite} />
-        )}
+        {activeTab === "library" && <CoachLibrary onLoadFavourite={handleLoadFavourite} />}
 
-        {activeTab === "athletes" && (
-          <AthleteProfile
-            selectedAthleteId={selectedAthleteId}
-            onAthletesChange={() => setAthletes(Athletes.list())}
-            onSelectAthlete={(athlete) => {
-              setAthletes(Athletes.list());
-              handleSelectAthlete(athlete);
-            }}
-          />
-        )}
+        {activeTab === "athletes" && <AthleteProfile selectedAthleteId={selectedAthleteId} onAthletesChange={() => setAthletes(Athletes.list())} onSelectAthlete={(athlete) => { setAthletes(Athletes.list()); handleSelectAthlete(athlete); }} />}
 
-        {activeTab === "history" && (
-          <SessionHistory onOpen={handleLoadSavedSession} />
-        )}
+        {activeTab === "history" && <SessionHistory onOpen={handleLoadSavedSession} />}
 
         {activeTab === "community" && <CommunityHub />}
+
+        {activeTab === "upgrade" && <ProGate feature="Planning, library, athletes and history" />}
       </main>
 
       <footer className="border-t border-[#CBD5E1] mt-10">

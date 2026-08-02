@@ -266,6 +266,7 @@ export default function SessionResult({
   readOnly = false,
   hideShare = false,
   defaultFavouriteId = null,
+  isPro = true,
 }) {
   const [session, setSession] = useState(() => deepCloneSession(originalSession));
   const [editing, setEditingState] = useState(false);
@@ -443,7 +444,7 @@ export default function SessionResult({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {!readOnly && (
+          {!readOnly && isPro && (
             <Button
               onClick={handleSaveSession}
               data-testid="save-session-button"
@@ -452,7 +453,7 @@ export default function SessionResult({
               <Save className="h-4 w-4 mr-2" /> Save Session
             </Button>
           )}
-          {!readOnly && (
+          {!readOnly && isPro && (
             <Button
               onClick={handleFavourite}
               data-testid="favourite-button"
@@ -464,14 +465,14 @@ export default function SessionResult({
               {favouriteId ? "Saved" : "Save"}
             </Button>
           )}
-          {!readOnly && (
+          {!readOnly && isPro && (
             <JournalPanel
               sessionKey={sessionKey}
               session={session}
               profile={profile}
             />
           )}
-          {!readOnly && (
+          {!readOnly && isPro && (
             <Button
               onClick={() => setEditing((v) => !v)}
               data-testid="edit-toggle-button"
@@ -488,7 +489,7 @@ export default function SessionResult({
               )}
             </Button>
           )}
-          {!readOnly && (
+          {!readOnly && isPro && (
             <Button
               onClick={handleReset}
               data-testid="reset-button"
@@ -497,7 +498,7 @@ export default function SessionResult({
               <RotateCcw className="h-4 w-4 mr-2" /> Reset
             </Button>
           )}
-          {!readOnly && !hideShare && (
+          {!readOnly && isPro && !hideShare && (
             <Button
               onClick={handleShare}
               disabled={sharing}
@@ -508,13 +509,7 @@ export default function SessionResult({
               {sharing ? "Sharing…" : "Share"}
             </Button>
           )}
-          <Button
-            onClick={() => exportPdf(session, profile)}
-            data-testid="export-pdf-button"
-            className="h-11 rounded-sm bg-white text-[#003366] hover:bg-[#F1F5F9] font-display font-bold tracking-wide"
-          >
-            <FileDown className="h-4 w-4 mr-2" /> Export PDF
-          </Button>
+          {isPro && <Button onClick={() => exportPdf(session, profile)} data-testid="export-pdf-button" className="h-11 rounded-sm bg-white text-[#003366] hover:bg-[#F1F5F9] font-display font-bold tracking-wide"><FileDown className="h-4 w-4 mr-2" /> Export PDF</Button>}
           <Button
             onClick={handleCopy}
             data-testid="copy-button"
