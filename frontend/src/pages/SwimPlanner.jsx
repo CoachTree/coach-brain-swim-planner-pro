@@ -334,7 +334,7 @@ export default function SwimPlanner() {
                 {athletes.map((athlete) => <option key={athlete.id} value={athlete.id}>{athlete.name}{athlete.team ? ` · ${athlete.team}` : ""}</option>)}
               </select>
             ) : (
-              <button type="button" onClick={() => setActiveTab("athletes")} className="w-full border border-dashed border-[#CBD5E1] p-4 text-left text-sm text-[#475569] hover:border-[#003366] hover:text-[#003366]">No athlete profiles yet. Add one in Athletes.</button>
+              <button type="button" onClick={() => selectTab("athletes")} className="w-full border border-dashed border-[#CBD5E1] p-4 text-left text-sm text-[#475569] hover:border-[#003366] hover:text-[#003366]">No athlete profiles yet. Athlete profiles are available in Coach Brain Pro.</button>
             )}
           </div>
           <div data-testid="field-age">
