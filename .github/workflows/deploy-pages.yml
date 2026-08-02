@@ -29,6 +29,9 @@ jobs:
         run: npm ci --legacy-peer-deps
       - name: Build static site
         working-directory: frontend
+        env:
+          REACT_APP_SUPABASE_URL: ${{ secrets.REACT_APP_SUPABASE_URL }}
+          REACT_APP_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.REACT_APP_SUPABASE_PUBLISHABLE_KEY }}
         run: PUBLIC_URL=. npm run build
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

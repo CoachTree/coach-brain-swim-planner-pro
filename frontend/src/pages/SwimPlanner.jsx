@@ -12,8 +12,10 @@ import SeasonPlanner from "@/components/swim/SeasonPlanner";
 import AthleteProfile from "@/components/swim/AthleteProfile";
 import SessionHistory from "@/components/swim/SessionHistory";
 import CommunityHub from "@/components/swim/CommunityHub";
+import AccountPanel from "@/components/auth/AccountPanel";
 import { generateSession } from "@/lib/sessionGenerator";
 import { Athletes } from "@/lib/localStore";
+import { useCoachAccess } from "@/hooks/useCoachAccess";
 
 const MIN_AGE = 4;
 const MAX_AGE = 99;
@@ -48,7 +50,7 @@ const SESSION_ROLE_LABELS = {
   "race week": "Race week",
 };
 
-function ProGate({ feature }) {
+function ProGate({ feature, access, onOpenAccount }) {
   return (
     <section className="border border-[#CBD5E1] bg-[#F8FAFC] p-7 sm:p-9 text-center">
       <div className="mx-auto flex h-11 w-11 items-center justify-center bg-[#003366] text-[#00E5FF]">
@@ -59,6 +61,14 @@ function ProGate({ feature }) {
       <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-[#475569]">
         The free version lets coaches build sessions and explore Community. Pro adds planning, saved coaching work, and athlete workflow tools.
       </p>
+      {access.configured && !access.user && (
+        <button type="button" onClick={onOpenAccount} className="mt-5 text-sm font-bold text-[#003366] underline underline-offset-4">
+          Sign in with your purchase email to activate Pro
+        </button>
+      )}
+      {access.configured && access.user && !access.isPro && (
+        <p className="mx-auto mt-4 max-w-md text-xs leading-relaxed text-[#64748B]">Signed in as {access.user.email}. Pro is activated after your purchase receipt is checked.</p>
+      )}
       <a
         href={GUMROAD_URL}
         target="_blank"
@@ -73,7 +83,9 @@ function ProGate({ feature }) {
 }
 
 export default function SwimPlanner() {
+  const access = useCoachAccess();
   const [activeTab, setActiveTab] = useState("session");
+  const [accountPanelOpenSignal, setAccountPanelOpenSignal] = useState(0);
   const [athletes, setAthletes] = useState(() => Athletes.list());
   const [selectedAthleteId, setSelectedAthleteId] = useState("");
   const [age, setAge] = useState(DEFAULT_AGE);
@@ -95,7 +107,7 @@ export default function SwimPlanner() {
   const freeTabs = new Set(["session", "community"]);
 
   const selectTab = (key) => {
-    if (!freeTabs.has(key)) {
+    if (!access.isPro && !freeTabs.has(key)) {
       setActiveTab("upgrade");
       toast.info("This is a Coach Brain Pro feature");
       return;
@@ -253,11 +265,12 @@ export default function SwimPlanner() {
           </div>
           <button
             type="button"
-            onClick={() => setActiveTab("upgrade")}
+            onClick={() => setActiveTab(access.isPro ? "session" : "upgrade")}
             className="hidden sm:inline-flex items-center gap-2 border border-[#003366] px-3 py-2 text-xs font-bold text-[#003366] hover:bg-[#003366] hover:text-white"
           >
-            <LockKeyhole className="h-3.5 w-3.5" /> Free plan
+            {access.isPro ? <Sparkles className="h-3.5 w-3.5" /> : <LockKeyhole className="h-3.5 w-3.5" />} {access.isPro ? "Coach Brain Pro" : "Free plan"}
           </button>
+          <AccountPanel access={access} openSignal={accountPanelOpenSignal} />
           {/* Unit toggle */}
           <div
             className="flex items-center border border-[#CBD5E1] rounded-sm overflow-hidden"
@@ -296,7 +309,7 @@ export default function SwimPlanner() {
               data-active={activeTab === key}
               className="px-3 py-3 text-xs sm:text-sm font-display font-black tracking-wide border-r last:border-r-0 border-[#CBD5E1] data-[active=true]:bg-[#003366] data-[active=true]:text-white text-[#475569] hover:text-[#003366]"
             >
-              <span className="inline-flex items-center gap-1">{label}{isPro && <LockKeyhole className="h-3 w-3" />}</span>
+              <span className="inline-flex items-center gap-1">{label}{isPro && !access.isPro && <LockKeyhole className="h-3 w-3" />}</span>
             </button>
           ))}
         </div>
@@ -475,26 +488,26 @@ export default function SwimPlanner() {
               originalSession={originalSession}
               profile={profile}
               defaultFavouriteId={loadedFavouriteId}
-              isPro={false}
+              isPro={access.isPro}
             />
           )}
         </div>
 
-        <div className="mt-14"><ProGate feature="Coach Library" /></div>
+        {!access.isPro && <div className="mt-14"><ProGate feature="Coach Library" access={access} onOpenAccount={() => setAccountPanelOpenSignal((value) => value + 1)} /></div>}
           </>
         )}
 
-        {activeTab === "season" && <SeasonPlanner />}
+        {activeTab === "season" && access.isPro && <SeasonPlanner />}
 
-        {activeTab === "library" && <CoachLibrary onLoadFavourite={handleLoadFavourite} />}
+        {activeTab === "library" && access.isPro && <CoachLibrary onLoadFavourite={handleLoadFavourite} />}
 
-        {activeTab === "athletes" && <AthleteProfile selectedAthleteId={selectedAthleteId} onAthletesChange={() => setAthletes(Athletes.list())} onSelectAthlete={(athlete) => { setAthletes(Athletes.list()); handleSelectAthlete(athlete); }} />}
+        {activeTab === "athletes" && access.isPro && <AthleteProfile selectedAthleteId={selectedAthleteId} onAthletesChange={() => setAthletes(Athletes.list())} onSelectAthlete={(athlete) => { setAthletes(Athletes.list()); handleSelectAthlete(athlete); }} />}
 
-        {activeTab === "history" && <SessionHistory onOpen={handleLoadSavedSession} />}
+        {activeTab === "history" && access.isPro && <SessionHistory onOpen={handleLoadSavedSession} />}
 
         {activeTab === "community" && <CommunityHub />}
 
-        {activeTab === "upgrade" && <ProGate feature="Planning, library, athletes and history" />}
+        {activeTab === "upgrade" && <ProGate feature="Planning, library, athletes and history" access={access} onOpenAccount={() => setAccountPanelOpenSignal((value) => value + 1)} />}
       </main>
 
       <footer className="border-t border-[#CBD5E1] mt-10">
