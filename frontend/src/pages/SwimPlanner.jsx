@@ -233,8 +233,20 @@ export default function SwimPlanner() {
         paceTarget,
       });
       setOriginalSession(data);
-      setLoadedFavouriteId(null);
-      toast.success("Session ready");
+
+if (window.gtag) {
+  window.gtag("event", "generate_session", {
+    stroke,
+    goal,
+    level,
+    distance,
+    intensity,
+    pool_type: poolType,
+  });
+}
+
+setLoadedFavouriteId(null);
+toast.success("Session ready");
       setTimeout(() => {
         document
           .getElementById("session-result")
