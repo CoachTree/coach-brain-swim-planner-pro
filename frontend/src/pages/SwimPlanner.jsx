@@ -14,7 +14,7 @@ import SessionHistory from "@/components/swim/SessionHistory";
 import CommunityHub from "@/components/swim/CommunityHub";
 import AccountPanel from "@/components/auth/AccountPanel";
 import { generateSession } from "@/lib/sessionGenerator";
-import { Athletes } from "@/lib/localStore";
+import { Athletes, SavedSessions } from "@/lib/localStore";
 import { useCoachAccess } from "@/hooks/useCoachAccess";
 
 const MIN_AGE = 4;
@@ -30,7 +30,7 @@ const INTENSITIES = ["recovery", "easy", "moderate", "hard", "race pace"];
 const SESSION_ROLES = ["standalone", "preparation", "build kick/pull emphasis", "intensive", "race specific", "taper", "race week"];
 const POOL_SIZES = ["25", "50"];
 const UNITS = ["m", "yd"];
-const GUMROAD_URL = "https://sakuraiyuji.gumroad.com/l/coach-brain-pro";
+const GUMROAD_URL = "https://coachtree.gumroad.com/l/coach-brain-pro";
 
 const INTENSITY_LABELS = {
   recovery: "1 · Recovery",
@@ -233,6 +233,13 @@ export default function SwimPlanner() {
         paceTarget,
       });
       setOriginalSession(data);
+      if (access.isPro) {
+  SavedSessions.upsert({
+    name: `${stroke} · ${goal} · ${distance}${unit}`,
+    profile,
+    session: data,
+  });
+}
 
 if (window.gtag) {
   window.gtag("event", "generate_session", {
