@@ -1,19 +1,37 @@
 import { useCallback, useEffect, useState } from "react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabaseClient";
 
-const initialState = {
-  configured: isSupabaseConfigured,
-  loading: isSupabaseConfigured,
-  user: null,
-  plan: "free",
-  isPro: false,
-  error: null,
-};
+const isLocalDeveloper = process.env.NODE_ENV === "development";
+
+const initialState = isLocalDeveloper
+  ? {
+      configured: true,
+      loading: false,
+      user: {
+        id: "local-developer",
+        email: "developer@localhost",
+      },
+      plan: "pro",
+      isPro: true,
+      error: null,
+    }
+  : {
+      configured: isSupabaseConfigured,
+      loading: isSupabaseConfigured,
+      user: null,
+      plan: "free",
+      isPro: false,
+      error: null,
+    };
 
 export function useCoachAccess() {
   const [access, setAccess] = useState(initialState);
 
   const refresh = useCallback(async () => {
+      if (isLocalDeveloper) {
+    setAccess(initialState);
+    return;
+  }
     if (!supabase) {
       setAccess({ ...initialState, loading: false });
       return;
@@ -53,6 +71,7 @@ export function useCoachAccess() {
 
   useEffect(() => {
     refresh();
+    if (isLocalDeveloper) return undefined;
     if (!supabase) return undefined;
 
     const { data: listener } = supabase.auth.onAuthStateChange(() => {
