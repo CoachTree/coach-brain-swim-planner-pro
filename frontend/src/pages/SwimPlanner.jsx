@@ -157,7 +157,13 @@ export default function SwimPlanner() {
   const profile = useMemo(
     () => ({
       athleteId: selectedAthleteId || undefined,
-      athleteName: athletes.find((athlete) => athlete.id === selectedAthleteId)?.name,
+      athleteId: selectedAthleteId || undefined,
+athleteName: athletes.find(
+  (athlete) => String(athlete.id) === String(selectedAthleteId)
+)?.name,
+team: athletes.find(
+  (athlete) => String(athlete.id) === String(selectedAthleteId)
+)?.team || "",
       age,
       level,
       stroke,
@@ -177,7 +183,7 @@ export default function SwimPlanner() {
       setSelectedAthleteId("");
       return;
     }
-    setSelectedAthleteId(athlete.id);
+    setSelectedAthleteId(String(athlete.id));
     if (athlete.age !== "" && Number(athlete.age) >= MIN_AGE && Number(athlete.age) <= MAX_AGE) {
       setAge(athlete.age);
     }
@@ -282,13 +288,7 @@ toast.success("Session ready");
               </h1>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => setActiveTab(access.isPro ? "session" : "upgrade")}
-            className="hidden sm:inline-flex items-center gap-2 border border-[#003366] px-3 py-2 text-xs font-bold text-[#003366] hover:bg-[#003366] hover:text-white"
-          >
-            {access.isPro ? <Sparkles className="h-3.5 w-3.5" /> : <LockKeyhole className="h-3.5 w-3.5" />} {access.isPro ? "Coach Brain Pro" : "Free plan"}
-          </button>
+         
           <AccountPanel access={access} openSignal={accountPanelOpenSignal} />
           {/* Unit toggle */}
           <div
@@ -358,12 +358,12 @@ toast.success("Session ready");
               <select
                 id="session-athlete"
                 value={selectedAthleteId}
-                onChange={(event) => handleSelectAthlete(athletes.find((athlete) => athlete.id === event.target.value) || null)}
+                onChange={(event) => handleSelectAthlete(athletes.find((athlete) => String(athlete.id) === String(event.target.value)) || null)}
                 className="flex h-14 w-full rounded-sm border border-[#CBD5E1] bg-white px-4 text-base font-display font-bold"
                 data-testid="session-athlete-select"
               >
                 <option value="">Manual profile / no athlete selected</option>
-                {athletes.map((athlete) => <option key={athlete.id} value={athlete.id}>{athlete.name}{athlete.team ? ` · ${athlete.team}` : ""}</option>)}
+                {athletes.map((athlete) => <option key={athlete.id} value={String(athlete.id)}>{athlete.name}{athlete.team ? ` · ${athlete.team}` : ""}</option>)}
               </select>
             ) : (
               <button type="button" onClick={() => selectTab("athletes")} className="w-full border border-dashed border-[#CBD5E1] p-4 text-left text-sm text-[#475569] hover:border-[#003366] hover:text-[#003366]">No athlete profiles yet. Athlete profiles are available in Coach Brain Pro.</button>
@@ -522,7 +522,7 @@ toast.success("Session ready");
 
         {activeTab === "athletes" && access.isPro && <AthleteProfile selectedAthleteId={selectedAthleteId} onAthletesChange={() => setAthletes(Athletes.list())} onSelectAthlete={(athlete) => { setAthletes(Athletes.list()); handleSelectAthlete(athlete); }} />}
 
-        {activeTab === "history" && access.isPro && <SessionHistory onOpen={handleLoadSavedSession} />}
+        {activeTab === "history" && <SessionHistory onOpen={handleLoadSavedSession} />}
 
         {activeTab === "community" && <CommunityHub />}
 

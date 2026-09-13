@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabaseClient";
 
-const isLocalDeveloper = process.env.NODE_ENV === "development";
+const isLocalDeveloper = false;
 
 const initialState = isLocalDeveloper
   ? {

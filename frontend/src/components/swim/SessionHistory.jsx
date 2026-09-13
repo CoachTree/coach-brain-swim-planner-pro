@@ -71,6 +71,18 @@ export default function SessionHistory({ onOpen }) {
                 <div className="flex-1 min-w-0">
                   <div className="font-display font-bold text-[#0F172A] truncate">{saved.name}</div>
                   <div className="text-xs text-[#475569] mt-1">{sessionLabel(saved)}</div>
+                  
+                  {saved.profile?.athleteName && (
+  <div className="text-xs font-semibold text-[#003366] mt-1">
+    Athlete: {saved.profile.athleteName}
+  </div>
+)}
+
+{saved.profile?.team && (
+  <div className="text-xs text-[#64748B] mt-1">
+    Team: {saved.profile.team}
+  </div>
+)}
                   <div className="text-xs text-[#64748B] mt-1">Saved {formatDate(saved.updated_at || saved.created_at)}</div>
                 </div>
                 <Button onClick={() => onOpen?.(saved)} data-testid={`session-open-${saved.id}`} className="h-9 rounded-sm bg-[#003366] hover:bg-[#002244] text-white font-display font-bold text-sm">Open</Button>
