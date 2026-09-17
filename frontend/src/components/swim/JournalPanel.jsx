@@ -49,7 +49,11 @@ export default function JournalPanel({ sessionKey, session, profile }) {
 
   const handleSave = () => {
     if (!entry) return;
-    Journal.upsert(entry);
+    const saved = Journal.upsert(entry);
+    if (!saved) {
+      toast.error("Could not save journal entry. Browser storage may be unavailable.");
+      return;
+    }
     toast.success("Journal entry saved");
     setOpen(false);
   };

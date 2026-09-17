@@ -32,7 +32,11 @@ export default function SessionHistory({ onOpen }) {
   const rename = (saved) => {
     const name = window.prompt("Rename saved session", saved.name);
     if (!name?.trim()) return;
-    SavedSessions.upsert({ id: saved.id, name: name.trim() });
+    const updated = SavedSessions.upsert({ id: saved.id, name: name.trim() });
+    if (!updated) {
+      toast.error("Could not rename session. Browser storage may be unavailable.");
+      return;
+    }
     refresh();
     toast.success("Session renamed");
   };

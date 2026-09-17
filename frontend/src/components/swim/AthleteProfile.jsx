@@ -65,6 +65,10 @@ export default function AthleteProfile({ onSelectAthlete, onAthletesChange, sele
       name: form.name.trim(),
       age: form.age === "" ? "" : Number(form.age),
     });
+    if (!saved) {
+      toast.error("Could not save athlete. Browser storage may be unavailable.");
+      return;
+    }
     refresh();
     onAthletesChange?.();
     setForm(formFromAthlete(saved));

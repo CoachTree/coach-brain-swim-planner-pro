@@ -201,11 +201,15 @@ function TestSetsList({ items, onChange }) {
 
   const submit = () => {
     if (!name.trim()) return;
-    TestSets.upsert({
+    const saved = TestSets.upsert({
       name: name.trim(),
       description: description.trim(),
       results: [],
     });
+    if (!saved) {
+      toast.error("Could not save test set. Browser storage may be unavailable.");
+      return;
+    }
     setName("");
     setDescription("");
     setCreating(false);
@@ -319,7 +323,11 @@ function TestSetRow({ testSet, onChange }) {
         },
       ],
     };
-    TestSets.upsert(next);
+    const saved = TestSets.upsert(next);
+    if (!saved) {
+      toast.error("Could not save test result. Browser storage may be unavailable.");
+      return;
+    }
     setResult("");
     setNotes("");
     setLogging(false);

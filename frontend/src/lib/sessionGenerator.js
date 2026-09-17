@@ -1,4 +1,16 @@
 import { generateCoachBrain } from "./coachBrain";
+
+function createSessionId() {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return "xxxxxxxxxxxx4xxxyxxxxxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 /**
  * Rule-based local swim training session generator.
  *
@@ -958,6 +970,7 @@ export function generateSession(profile) {
   const allocated = allocateVolumes(profile);
 
   const session = {
+    session_id: createSessionId(),
     summary: buildSummary(profile, allocated),
     total_distance_m: Object.values(allocated).reduce((a, b) => a + b, 0),
     training_goal: profile.goal,

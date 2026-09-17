@@ -59,8 +59,9 @@ function readArr(key) {
 function writeArr(key, arr) {
   try {
     localStorage.setItem(key, JSON.stringify(arr));
+    return true;
   } catch {
-    /* quota / disabled — silently ignore */
+    return false;
   }
 }
 
@@ -112,12 +113,12 @@ function makeCollection(storageKey) {
       if (idx >= 0) {
         const merged = withMeta(entry, arr[idx]);
         arr[idx] = merged;
-        writeArr(storageKey, arr);
+        if (!writeArr(storageKey, arr)) return null;
         return merged;
       }
       const created = withMeta(entry);
       arr.push(created);
-      writeArr(storageKey, arr);
+      if (!writeArr(storageKey, arr)) return null;
       return created;
     },
     remove(id) {

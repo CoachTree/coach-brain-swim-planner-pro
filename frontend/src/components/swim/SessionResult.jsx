@@ -245,6 +245,11 @@ function deepCloneSession(s) {
   if (!s) return s;
   return {
     ...s,
+    session_id:
+      s.session_id ||
+      (typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : String(Date.now())),
     warm_up: s.warm_up && { ...s.warm_up, items: [...(s.warm_up.items || [])] },
     drill_set: s.drill_set && { ...s.drill_set, items: [...(s.drill_set.items || [])] },
     kick_set: s.kick_set && { ...s.kick_set, items: [...(s.kick_set.items || [])] },
@@ -273,11 +278,10 @@ export default function SessionResult({
   const [sharing, setSharing] = useState(false);
   const [favouriteId, setFavouriteId] = useState(defaultFavouriteId);
 
-  // Stable session-key for journal entries. Tied to the originalSession reference.
+  // Use the session ID so identical profiles still get separate journal entries.
   const sessionKey = useMemo(
-    () =>
-      `${originalSession?.summary || ""}|${originalSession?.total_distance_m || ""}|${profile?.stroke || ""}|${profile?.intensity || ""}|${profile?.poolType || ""}`,
-    [originalSession, profile],
+    () => session?.session_id,
+    [session],
   );
 
   // In read-only mode the edit UI must never be active
@@ -337,7 +341,11 @@ export default function SessionResult({
   const handleFavourite = () => {
     if (favouriteId) {
       // Toggle off / update existing
-      Favourites.upsert({ id: favouriteId, session, profile });
+      const saved = Favourites.upsert({ id: favouriteId, session, profile });
+      if (!saved) {
+        toast.error("Could not save favourite. Browser storage may be unavailable.");
+        return;
+      }
       toast.success("Favourite updated");
       return;
     }
@@ -349,6 +357,10 @@ export default function SessionResult({
       session,
       profile,
     });
+    if (!saved) {
+      toast.error("Could not save favourite. Browser storage may be unavailable.");
+      return;
+    }
     setFavouriteId(saved.id);
     toast.success("Saved to favourites");
   };
@@ -357,11 +369,15 @@ export default function SessionResult({
     const defaultName = `${session.total_distance_m || profile.distance} ${profile.unit || "m"} · ${profile.stroke} · ${profile.intensity}`;
     const name = window.prompt("Name this saved session", defaultName);
     if (!name?.trim()) return;
-    SavedSessions.upsert({
+    const saved = SavedSessions.upsert({
       name: name.trim(),
       session,
       profile,
     });
+    if (!saved) {
+      toast.error("Could not save session. Browser storage may be unavailable.");
+      return;
+    }
     toast.success("Session saved");
   };
 
