@@ -376,10 +376,17 @@ export default function SessionResult({
   }, []);
 
   const updateDistance = useCallback((blockKey, val) => {
-    setSession((s) => ({
-      ...s,
-      [blockKey]: { ...s[blockKey], distance_m: Number(val) || 0 },
-    }));
+    setSession((s) => {
+      const next = {
+        ...s,
+        [blockKey]: { ...s[blockKey], distance_m: Number(val) || 0 },
+      };
+      next.total_distance_m = BLOCKS.reduce(
+        (total, block) => total + Number(next[block.key]?.distance_m || 0),
+        0,
+      );
+      return next;
+    });
   }, []);
 
   const addItem = useCallback((blockKey) => {

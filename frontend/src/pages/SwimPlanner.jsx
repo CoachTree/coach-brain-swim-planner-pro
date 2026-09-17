@@ -14,7 +14,7 @@ import SessionHistory from "@/components/swim/SessionHistory";
 import CommunityHub from "@/components/swim/CommunityHub";
 import AccountPanel from "@/components/auth/AccountPanel";
 import { generateSession } from "@/lib/sessionGenerator";
-import { Athletes, SavedSessions } from "@/lib/localStore";
+import { Athletes } from "@/lib/localStore";
 import { useCoachAccess } from "@/hooks/useCoachAccess";
 
 const MIN_AGE = 4;
@@ -239,13 +239,6 @@ team: athletes.find(
         paceTarget,
       });
       setOriginalSession(data);
-      if (access.isPro) {
-  SavedSessions.upsert({
-    name: `${stroke} · ${goal} · ${distance}${unit}`,
-    profile,
-    session: data,
-  });
-}
 
 if (window.gtag) {
   window.gtag("event", "generate_session", {
