@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Loader2, Waves, ArrowDown, LockKeyhole, Sparkles } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -14,7 +14,8 @@ import SessionHistory from "@/components/swim/SessionHistory";
 import CommunityHub from "@/components/swim/CommunityHub";
 import AccountPanel from "@/components/auth/AccountPanel";
 import { generateSession } from "@/lib/sessionGenerator";
-import { Athletes } from "@/lib/localStore";
+import { Athletes as CloudAthletes } from "@/lib/cloudStore";
+import { Athletes as LocalAthletes } from "@/lib/localStore";
 import { useCoachAccess } from "@/hooks/useCoachAccess";
 
 const MIN_AGE = 4;
@@ -86,7 +87,7 @@ export default function SwimPlanner() {
   const access = useCoachAccess();
   const [activeTab, setActiveTab] = useState("session");
   const [accountPanelOpenSignal, setAccountPanelOpenSignal] = useState(0);
-  const [athletes, setAthletes] = useState(() => Athletes.list());
+  const [athletes, setAthletes] = useState([]);
   const [selectedAthleteId, setSelectedAthleteId] = useState("");
   const [age, setAge] = useState(DEFAULT_AGE);
   const [level, setLevel] = useState("intermediate");
@@ -156,7 +157,6 @@ export default function SwimPlanner() {
 
   const profile = useMemo(
     () => ({
-      athleteId: selectedAthleteId || undefined,
       athleteId: selectedAthleteId || undefined,
 athleteName: athletes.find(
   (athlete) => String(athlete.id) === String(selectedAthleteId)
@@ -513,7 +513,7 @@ toast.success("Session ready");
 
         {activeTab === "library" && access.isPro && <CoachLibrary onLoadFavourite={handleLoadFavourite} />}
 
-        {activeTab === "athletes" && access.isPro && <AthleteProfile selectedAthleteId={selectedAthleteId} onAthletesChange={() => setAthletes(Athletes.list())} onSelectAthlete={(athlete) => { setAthletes(Athletes.list()); handleSelectAthlete(athlete); }} />}
+        {activeTab === "athletes" && access.isPro && <AthleteProfile athleteStore={athleteStore} selectedAthleteId={selectedAthleteId} onAthletesChange={refreshAthletes} onSelectAthlete={(athlete) => { refreshAthletes().then(() => handleSelectAthlete(athlete)).catch(() => toast.error("Could not refresh athletes.")); }} />}
 
         {activeTab === "history" && <SessionHistory onOpen={handleLoadSavedSession} />}
 

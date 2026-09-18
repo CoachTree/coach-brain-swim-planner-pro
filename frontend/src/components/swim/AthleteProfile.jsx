@@ -1,10 +1,9 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Pencil, Plus, Trash2, UserRound, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import TileGroup from "@/components/swim/TileGroup";
-import { Athletes } from "@/lib/localStore";
 
 const STROKES = ["freestyle", "backstroke", "breaststroke", "butterfly", "IM"];
 const GENDERS = ["female", "male", "non-binary", "prefer not to say"];
@@ -25,17 +24,21 @@ function formFromAthlete(athlete) {
   return athlete ? { ...EMPTY_FORM, ...athlete, age: athlete.age ?? "" } : { ...EMPTY_FORM };
 }
 
-export default function AthleteProfile({ onSelectAthlete, onAthletesChange, selectedAthleteId }) {
+export default function AthleteProfile({ athleteStore, onSelectAthlete, onAthletesChange, selectedAthleteId }) {
   const [athletes, setAthletes] = useState([]);
   const [form, setForm] = useState(EMPTY_FORM);
   const [editingId, setEditingId] = useState(null);
   const [showForm, setShowForm] = useState(false);
 
-  const refresh = () => setAthletes(Athletes.list());
+  const refresh = useCallback(async () => {
+    const records = await athleteStore.list();
+    setAthletes(records);
+    return records;
+  }, [athleteStore]);
 
   useEffect(() => {
-    refresh();
-  }, []);
+    refresh().catch(() => toast.error("Could not load athletes from cloud storage."));
+  }, [refresh]);
 
   const update = (field) => (event) => {
     setForm((current) => ({ ...current, [field]: event.target.value }));
@@ -53,36 +56,41 @@ export default function AthleteProfile({ onSelectAthlete, onAthletesChange, sele
     setShowForm(true);
   };
 
-  const handleSave = (event) => {
+  const handleSave = async (event) => {
     event.preventDefault();
     if (!form.name.trim()) {
       toast.error("Please enter an athlete name");
       return;
     }
-    const saved = Athletes.upsert({
-      ...form,
-      id: editingId || undefined,
-      name: form.name.trim(),
-      age: form.age === "" ? "" : Number(form.age),
-    });
-    if (!saved) {
-      toast.error("Could not save athlete. Browser storage may be unavailable.");
-      return;
+    try {
+      const saved = await athleteStore.upsert({
+        ...form,
+        id: editingId || undefined,
+        name: form.name.trim(),
+        age: form.age === "" ? "" : Number(form.age),
+      });
+      if (!saved) throw new Error("Could not save athlete.");
+      await refresh();
+      await onAthletesChange?.();
+      setForm(formFromAthlete(saved));
+      setShowForm(false);
+      toast.success(editingId ? "Athlete updated" : "Athlete added");
+    } catch (error) {
+      toast.error(error.message || "Could not save athlete to cloud storage.");
     }
-    refresh();
-    onAthletesChange?.();
-    setForm(formFromAthlete(saved));
-    setShowForm(false);
-    toast.success(editingId ? "Athlete updated" : "Athlete added");
   };
 
-  const handleDelete = (athlete) => {
+  const handleDelete = async (athlete) => {
     if (!window.confirm(`Delete ${athlete.name}?`)) return;
-    Athletes.remove(athlete.id);
-    refresh();
-    onAthletesChange?.();
-    if (selectedAthleteId === athlete.id) onSelectAthlete?.(null);
-    toast.success("Athlete deleted");
+    try {
+      await athleteStore.remove(athlete.id);
+      await refresh();
+      await onAthletesChange?.();
+      if (selectedAthleteId === athlete.id) onSelectAthlete?.(null);
+      toast.success("Athlete deleted");
+    } catch (error) {
+      toast.error(error.message || "Could not delete athlete from cloud storage.");
+    }
   };
 
   return (
