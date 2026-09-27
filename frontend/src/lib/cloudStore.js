@@ -119,6 +119,7 @@ function makeCollection(table) {
         .eq("user_id", userId);
 
       if (error) throw error;
+      return true;
     },
 
     async clear() {

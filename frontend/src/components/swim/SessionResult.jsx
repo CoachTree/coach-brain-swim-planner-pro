@@ -272,6 +272,8 @@ export default function SessionResult({
   hideShare = false,
   defaultFavouriteId = null,
   isPro = true,
+  favouriteStore = Favourites,
+  sessionStore = SavedSessions,
 }) {
   const [session, setSession] = useState(() => deepCloneSession(originalSession));
   const [editing, setEditingState] = useState(false);
@@ -338,47 +340,57 @@ export default function SessionResult({
     }
   };
 
-  const handleFavourite = () => {
-    if (favouriteId) {
-      // Toggle off / update existing
-      const saved = Favourites.upsert({ id: favouriteId, session, profile });
-      if (!saved) {
-        toast.error("Could not save favourite. Browser storage may be unavailable.");
+  const handleFavourite = async () => {
+    try {
+      if (favouriteId) {
+        // Read the latest record so updating the workout preserves its name and metadata.
+        const existing = await favouriteStore.get(favouriteId);
+        if (!existing) throw new Error("Favourite no longer exists. Please save it again.");
+        const saved = await favouriteStore.upsert({ ...existing, session, profile });
+        if (!saved) {
+          toast.error("Could not save favourite.");
+          return;
+        }
+        toast.success("Favourite updated");
         return;
       }
-      toast.success("Favourite updated");
-      return;
+      const defaultName = `${profile.distance} ${profile.unit || "m"} · ${profile.stroke} · ${profile.intensity}`;
+      const name = window.prompt("Name this favourite session", defaultName);
+      if (!name) return;
+      const saved = await favouriteStore.upsert({
+        name: name.trim() || defaultName,
+        session,
+        profile,
+      });
+      if (!saved) {
+        toast.error("Could not save favourite.");
+        return;
+      }
+      setFavouriteId(saved.id);
+      toast.success("Saved to favourites");
+    } catch (error) {
+      toast.error(error.message || "Could not save favourite.");
     }
-    const defaultName = `${profile.distance} ${profile.unit || "m"} · ${profile.stroke} · ${profile.intensity}`;
-    const name = window.prompt("Name this favourite session", defaultName);
-    if (!name) return;
-    const saved = Favourites.upsert({
-      name: name.trim() || defaultName,
-      session,
-      profile,
-    });
-    if (!saved) {
-      toast.error("Could not save favourite. Browser storage may be unavailable.");
-      return;
-    }
-    setFavouriteId(saved.id);
-    toast.success("Saved to favourites");
   };
 
-  const handleSaveSession = () => {
+  const handleSaveSession = async () => {
     const defaultName = `${session.total_distance_m || profile.distance} ${profile.unit || "m"} · ${profile.stroke} · ${profile.intensity}`;
     const name = window.prompt("Name this saved session", defaultName);
     if (!name?.trim()) return;
-    const saved = SavedSessions.upsert({
-      name: name.trim(),
-      session,
-      profile,
-    });
-    if (!saved) {
-      toast.error("Could not save session. Browser storage may be unavailable.");
-      return;
+    try {
+      const saved = await sessionStore.upsert({
+        name: name.trim(),
+        session,
+        profile,
+      });
+      if (!saved) {
+        toast.error("Could not save session. Browser storage may be unavailable.");
+        return;
+      }
+      toast.success("Session saved");
+    } catch (error) {
+      toast.error(error.message || "Could not save session.");
     }
-    toast.success("Session saved");
   };
 
   // ---- edit helpers ----

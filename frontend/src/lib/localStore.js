@@ -123,7 +123,7 @@ function makeCollection(storageKey) {
     },
     remove(id) {
       const arr = readArr(storageKey).filter((e) => e.id !== id);
-      writeArr(storageKey, arr);
+      return writeArr(storageKey, arr);
     },
     clear() {
       writeArr(storageKey, []);

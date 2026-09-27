@@ -14,8 +14,14 @@ import SessionHistory from "@/components/swim/SessionHistory";
 import CommunityHub from "@/components/swim/CommunityHub";
 import AccountPanel from "@/components/auth/AccountPanel";
 import { generateSession } from "@/lib/sessionGenerator";
+import { SavedSessions as CloudSessions } from "@/lib/cloudStore";
+import { SavedSessions as LocalSessions } from "@/lib/localStore";
+import { selectFavouriteStore } from "@/lib/favouriteStore";
+import { selectSessionStore } from "@/lib/sessionStore";
 import { Athletes as CloudAthletes } from "@/lib/cloudStore";
+import { Favourites as CloudFavourites } from "@/lib/cloudStore";
 import { Athletes as LocalAthletes } from "@/lib/localStore";
+import { Favourites as LocalFavourites } from "@/lib/localStore";
 import { useCoachAccess } from "@/hooks/useCoachAccess";
 
 const MIN_AGE = 4;
@@ -106,6 +112,31 @@ export default function SwimPlanner() {
   const [originalSession, setOriginalSession] = useState(null);
   const [loadedFavouriteId, setLoadedFavouriteId] = useState(null);
   const freeTabs = new Set(["session", "community"]);
+  const sessionStore = selectSessionStore(access, LocalSessions, CloudSessions);
+  const sessionScope = `${access.user?.id || "guest"}:${access.isPro ? "pro" : "free"}`;
+  const athleteStore = access.isPro && access.user ? CloudAthletes : LocalAthletes;
+  const favouriteStore = selectFavouriteStore(access, LocalFavourites, CloudFavourites);
+
+  useEffect(() => {
+    let active = true;
+    Promise.resolve(athleteStore.list())
+      .then((records) => {
+        if (active) setAthletes(records);
+      })
+      .catch(() => {
+        if (active) toast.error("Could not load athletes.");
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [athleteStore]);
+
+  const refreshAthletes = async () => {
+    const records = await athleteStore.list();
+    setAthletes(records);
+    return records;
+  };
 
   const selectTab = (key) => {
     if (!access.isPro && !freeTabs.has(key)) {
@@ -501,6 +532,8 @@ toast.success("Session ready");
               profile={profile}
               defaultFavouriteId={loadedFavouriteId}
               isPro={access.isPro}
+              sessionStore={sessionStore}
+              favouriteStore={favouriteStore}
             />
           )}
         </div>
@@ -511,11 +544,11 @@ toast.success("Session ready");
 
         {activeTab === "season" && access.isPro && <SeasonPlanner />}
 
-        {activeTab === "library" && access.isPro && <CoachLibrary onLoadFavourite={handleLoadFavourite} />}
+        {activeTab === "library" && access.isPro && <CoachLibrary favouriteStore={favouriteStore} onLoadFavourite={handleLoadFavourite} />}
 
         {activeTab === "athletes" && access.isPro && <AthleteProfile athleteStore={athleteStore} selectedAthleteId={selectedAthleteId} onAthletesChange={refreshAthletes} onSelectAthlete={(athlete) => { refreshAthletes().then(() => handleSelectAthlete(athlete)).catch(() => toast.error("Could not refresh athletes.")); }} />}
 
-        {activeTab === "history" && <SessionHistory onOpen={handleLoadSavedSession} />}
+        {activeTab === "history" && <SessionHistory key={sessionScope} sessionStore={sessionStore} onOpen={handleLoadSavedSession} />}
 
         {activeTab === "community" && <CommunityHub />}
 

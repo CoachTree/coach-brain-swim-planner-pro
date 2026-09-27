@@ -1,8 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Clock3, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { SavedSessions } from "@/lib/localStore";
 
 function sessionLabel(saved) {
   const profile = saved.profile || {};
@@ -20,32 +19,53 @@ function formatDate(value) {
   });
 }
 
-export default function SessionHistory({ onOpen }) {
+export default function SessionHistory({ onOpen, sessionStore }) {
   const [sessions, setSessions] = useState([]);
-
-  const refresh = () => setSessions(SavedSessions.list());
+  const scope = useRef(null);
 
   useEffect(() => {
-    refresh();
-  }, []);
+    const current = {};
+    scope.current = current;
+    setSessions([]);
+    const load = async () => {
+      try {
+        const data = await sessionStore.list();
+        if (scope.current === current) setSessions(data);
+      } catch {
+        if (scope.current === current) toast.error("Could not load sessions.");
+      }
+    };
+    load();
+    return () => { scope.current = null; };
+  }, [sessionStore]);
 
-  const rename = (saved) => {
-    const name = window.prompt("Rename saved session", saved.name);
+  const rename = async (saved) => {
+    const name = window.prompt("Rename saved session", saved.name || "");
     if (!name?.trim()) return;
-    const updated = SavedSessions.upsert({ id: saved.id, name: name.trim() });
-    if (!updated) {
-      toast.error("Could not rename session. Browser storage may be unavailable.");
-      return;
+    const current = scope.current;
+    try {
+      const updated = await sessionStore.upsert({ ...saved, name: name.trim() });
+      if (!updated) throw new Error("Rename failed");
+      if (scope.current !== current) return;
+      setSessions((records) => records.map((record) => record.id === saved.id ? updated : record));
+      toast.success("Session renamed");
+    } catch {
+      if (scope.current === current) toast.error("Could not rename session.");
     }
-    refresh();
-    toast.success("Session renamed");
   };
 
-  const remove = (saved) => {
+  const remove = async (saved) => {
     if (!window.confirm(`Delete ${saved.name}?`)) return;
-    SavedSessions.remove(saved.id);
-    refresh();
-    toast.success("Session deleted");
+    const current = scope.current;
+    try {
+      const removed = await sessionStore.remove(saved.id);
+      if (!removed) throw new Error("Delete failed");
+      if (scope.current !== current) return;
+      setSessions((records) => records.filter((record) => record.id !== saved.id));
+      toast.success("Session deleted");
+    } catch {
+      if (scope.current === current) toast.error("Could not delete session.");
+    }
   };
 
   return (
@@ -58,7 +78,7 @@ export default function SessionHistory({ onOpen }) {
           <span className="text-[#003366]">history.</span>
         </h2>
         <p className="mt-5 text-base sm:text-lg text-[#475569] max-w-lg leading-relaxed">
-          Reopen, rename, or remove sessions saved in this browser.
+          Reopen, rename, or remove your saved sessions.
         </p>
       </div>
 

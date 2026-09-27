@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
   Star,
@@ -24,16 +24,19 @@ const TABS = [
   { id: "test-sets", label: "Test sets" },
 ];
 
-export default function CoachLibrary({ onLoadFavourite }) {
+export default function CoachLibrary({ favouriteStore = Favourites, onLoadFavourite }) {
   const [tab, setTab] = useState("favourites");
   const [favourites, setFavourites] = useState([]);
   const [testSets, setTestSets] = useState([]);
 
-  const refresh = () => {
-    setFavourites(Favourites.list());
+  const refresh = useCallback(async () => {
+    const favouriteRecords = await favouriteStore.list();
+    setFavourites(favouriteRecords);
     setTestSets(TestSets.list());
-  };
-  useEffect(refresh, []);
+  }, [favouriteStore]);
+  useEffect(() => {
+    refresh().catch(() => toast.error("Could not load favourites."));
+  }, [refresh]);
 
   const handleExport = () => {
     const payload = exportCoachData();
@@ -119,10 +122,15 @@ export default function CoachLibrary({ onLoadFavourite }) {
                 onLoadFavourite?.(fav);
                 toast.success(`Loaded "${fav.name}"`);
               }}
-              onRemove={(id) => {
-                Favourites.remove(id);
-                refresh();
-                toast.success("Removed from favourites");
+              onRemove={async (id) => {
+                try {
+                  const removed = await favouriteStore.remove(id);
+                  if (!removed) throw new Error("Delete failed");
+                  setFavourites((records) => records.filter((record) => record.id !== id));
+                  toast.success("Removed from favourites");
+                } catch {
+                  toast.error("Could not remove favourite.");
+                }
               }}
             />
           )}
