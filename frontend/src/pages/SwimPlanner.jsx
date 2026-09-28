@@ -14,6 +14,7 @@ import SessionHistory from "@/components/swim/SessionHistory";
 import CommunityHub from "@/components/swim/CommunityHub";
 import AccountPanel from "@/components/auth/AccountPanel";
 import { generateSession } from "@/lib/sessionGenerator";
+import { trackGenerateSession } from "@/lib/generateAnalytics";
 import { SavedSessions as CloudSessions } from "@/lib/cloudStore";
 import { SavedSessions as LocalSessions } from "@/lib/localStore";
 import { selectFavouriteStore } from "@/lib/favouriteStore";
@@ -271,16 +272,14 @@ team: athletes.find(
       });
       setOriginalSession(data);
 
-if (window.gtag) {
-  window.gtag("event", "generate_session", {
-    stroke,
-    goal,
-    level,
-    distance,
-    intensity,
-    pool_type: poolType,
-  });
-}
+      trackGenerateSession({
+        stroke,
+        goal,
+        level,
+        distance,
+        intensity,
+        pool_type: poolType,
+      });
 
 setLoadedFavouriteId(null);
 toast.success("Session ready");
