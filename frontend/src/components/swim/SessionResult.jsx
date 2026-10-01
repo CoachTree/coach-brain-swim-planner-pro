@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   Copy,
@@ -279,6 +279,8 @@ export default function SessionResult({
   const [editing, setEditingState] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [favouriteId, setFavouriteId] = useState(defaultFavouriteId);
+  const [favouritePending, setFavouritePending] = useState(false);
+  const favouriteInFlight = useRef(false);
 
   // Use the session ID so identical profiles still get separate journal entries.
   const sessionKey = useMemo(
@@ -341,17 +343,15 @@ export default function SessionResult({
   };
 
   const handleFavourite = async () => {
+    if (favouriteInFlight.current) return;
+    favouriteInFlight.current = true;
+    setFavouritePending(true);
     try {
       if (favouriteId) {
-        // Read the latest record so updating the workout preserves its name and metadata.
-        const existing = await favouriteStore.get(favouriteId);
-        if (!existing) throw new Error("Favourite no longer exists. Please save it again.");
-        const saved = await favouriteStore.upsert({ ...existing, session, profile });
-        if (!saved) {
-          toast.error("Could not save favourite.");
-          return;
-        }
-        toast.success("Favourite updated");
+        const removed = await favouriteStore.remove(favouriteId);
+        if (!removed) throw new Error("Could not remove favourite.");
+        setFavouriteId(null);
+        toast.success("Removed from favourites");
         return;
       }
       const defaultName = `${profile.distance} ${profile.unit || "m"} · ${profile.stroke} · ${profile.intensity}`;
@@ -369,7 +369,10 @@ export default function SessionResult({
       setFavouriteId(saved.id);
       toast.success("Saved to favourites");
     } catch (error) {
-      toast.error(error.message || "Could not save favourite.");
+      toast.error(error?.message || (favouriteId ? "Could not remove favourite." : "Could not save favourite."));
+    } finally {
+      favouriteInFlight.current = false;
+      setFavouritePending(false);
     }
   };
 
@@ -491,6 +494,7 @@ export default function SessionResult({
           {!readOnly && isPro && (
             <Button
               onClick={handleFavourite}
+              disabled={favouritePending}
               data-testid="favourite-button"
               className="h-11 rounded-sm bg-white/10 hover:bg-white/20 text-white border border-white/30 font-display font-bold tracking-wide"
             >

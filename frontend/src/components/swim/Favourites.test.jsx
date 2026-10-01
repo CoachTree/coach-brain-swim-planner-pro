@@ -72,31 +72,32 @@ test.each([
   ["Free", { user: { id: "test-user" }, isPro: false }, false],
   ["Pro without login", { user: null, isPro: true }, false],
   ["signed-in Pro", { user: { id: "test-user" }, isPro: true }, true],
-])("%s selects correct repository and supports favourite Save → Update → Delete", async (_, access, cloud) => {
+])("%s selects correct repository and supports favourite Save → Remove → Save again → Library Delete", async (_, access, cloud) => {
   const store = selectFavouriteStore(access, LocalFavourites, CloudFavourites);
   expect(store).toBe(cloud ? CloudFavourites : LocalFavourites);
   await render(<SessionResult originalSession={session} profile={profile} favouriteStore={store} />);
   await click("favourite-button");
   const [saved] = await store.list();
   expect(saved.name).toBe("Keep this favourite name");
-  await store.upsert({ ...saved, coach_note: "Preserve this custom field" });
-  const nextSession = { total_distance_m: 1500 };
-  const nextProfile = { ...profile, distance: 1500 };
-  await render(<SessionResult originalSession={nextSession} profile={nextProfile} defaultFavouriteId={saved.id} favouriteStore={store} />);
+  expect(container.querySelector('[data-testid="favourite-button"]').textContent).toBe("Saved");
   await click("favourite-button");
-  const updated = await store.get(saved.id);
-  expect(updated).toMatchObject({ name: saved.name, coach_note: "Preserve this custom field", session: nextSession, profile: nextProfile, created_at: saved.created_at });
-  expect(toast.success).toHaveBeenCalledWith("Favourite updated");
-  expect(await store.list()).toHaveLength(1);
+  expect(await store.get(saved.id)).toBeNull();
+  expect(container.querySelector('[data-testid="favourite-button"]').textContent).toBe("Save");
+  expect(toast.success).toHaveBeenCalledWith("Removed from favourites");
+  await click("favourite-button");
+  const [resaved] = await store.list();
+  expect(resaved.id).not.toBe(saved.id);
+  expect(resaved).toMatchObject({ name: saved.name, session, profile });
+  expect(container.querySelector('[data-testid="favourite-button"]').textContent).toBe("Saved");
   await render(<CoachLibrary favouriteStore={store} />);
   expect(container.textContent).toContain(saved.name);
-  await click(`favourite-remove-${saved.id}`);
+  await click(`favourite-remove-${resaved.id}`);
   expect(await store.list()).toEqual([]);
   expect(container.textContent).not.toContain(saved.name);
   expect(toast.success).toHaveBeenCalledWith("Removed from favourites");
   expect(toast.error).not.toHaveBeenCalled();
   if (cloud) {
-    expect(calls.filter(call => call.operation === "upsert")).toHaveLength(3);
+    expect(calls.filter(call => call.operation === "upsert")).toHaveLength(2);
     expect(calls.find(call => call.operation === "delete").filters).toEqual({ id: saved.id, user_id: "test-user" });
     expect(LocalFavourites.list()).toEqual([]);
   } else {
@@ -117,20 +118,51 @@ test.each(["false", "throw"])("Delete %s shows an error and retains the row", as
   expect(toast.success).not.toHaveBeenCalled();
 });
 
-test("missing favourite is not recreated by Update", async () => {
-  const store = { get: jest.fn().mockResolvedValue(null), upsert: jest.fn() };
-  await render(<SessionResult originalSession={session} profile={profile} defaultFavouriteId="missing" favouriteStore={store} />);
-  await click("favourite-button");
-  expect(store.upsert).not.toHaveBeenCalled();
-  expect(toast.error).toHaveBeenCalled();
-});
-
-test("failed read aborts Update without replacing existing data", async () => {
-  const store = { get: jest.fn().mockRejectedValue(new Error("Offline")), upsert: jest.fn() };
+test.each(["false", "throw"])("toggle delete failure (%s) keeps Saved and retries the same id", async (mode) => {
+  const remove = jest.fn(() => mode === "false" ? false : Promise.reject(new Error("Denied")));
+  const store = { remove, upsert: jest.fn() };
   await render(<SessionResult originalSession={session} profile={profile} defaultFavouriteId="existing" favouriteStore={store} />);
   await click("favourite-button");
+  expect(container.querySelector('[data-testid="favourite-button"]').textContent).toBe("Saved");
+  expect(toast.error).toHaveBeenCalled();
+  expect(toast.success).not.toHaveBeenCalled();
+  remove.mockResolvedValue(true);
+  await click("favourite-button");
+  expect(remove.mock.calls).toEqual([["existing"], ["existing"]]);
   expect(store.upsert).not.toHaveBeenCalled();
-  expect(toast.error).toHaveBeenCalledWith("Offline");
+  expect(container.querySelector('[data-testid="favourite-button"]').textContent).toBe("Save");
+});
+
+test.each(["save", "delete"])("pending %s prevents duplicate requests", async (operation) => {
+  let resolve;
+  const pending = jest.fn(() => new Promise(done => { resolve = done; }));
+  const store = { upsert: pending, remove: pending };
+  await render(<SessionResult originalSession={session} profile={profile} defaultFavouriteId={operation === "delete" ? "existing" : null} favouriteStore={store} />);
+  const button = container.querySelector('[data-testid="favourite-button"]');
+  await act(async () => { button.click(); button.click(); });
+  expect(pending).toHaveBeenCalledTimes(1);
+  expect(button.disabled).toBe(true);
+  await act(async () => button.click());
+  expect(pending).toHaveBeenCalledTimes(1);
+  await act(async () => resolve(operation === "delete" ? true : { id: "new" }));
+  expect(button.disabled).toBe(false);
+  expect(button.textContent).toBe(operation === "delete" ? "Save" : "Saved");
+});
+
+test.each(["false", "throw", "cancel"])("unsuccessful save (%s) retains Save and releases lock", async (mode) => {
+  const store = { upsert: jest.fn(() => mode === "throw" ? Promise.reject(new Error("Offline")) : false) };
+  if (mode === "cancel") window.prompt.mockReturnValue(null);
+  await render(<SessionResult originalSession={session} profile={profile} favouriteStore={store} />);
+  await click("favourite-button");
+  const button = container.querySelector('[data-testid="favourite-button"]');
+  expect(button.textContent).toBe("Save");
+  expect(button.disabled).toBe(false);
+  if (mode === "cancel") expect(store.upsert).not.toHaveBeenCalled();
+  else expect(toast.error).toHaveBeenCalled();
+  window.prompt.mockReturnValue("Retry");
+  store.upsert.mockResolvedValue({ id: "retry" });
+  await click("favourite-button");
+  expect(button.textContent).toBe("Saved");
 });
 
 test("failed local write reports deletion failure and preserves data", async () => {
