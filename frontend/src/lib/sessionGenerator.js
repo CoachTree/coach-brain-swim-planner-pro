@@ -577,6 +577,11 @@ function genKickSet(profile, dist, u) {
       items.push("Odd: streamline/back or side kick · Even: board or choice kick; stable hips throughout."); return items;
     }},
     { id: "25-quality", build: () => {
+      if (poolSize(profile) === 50) {
+        const items = exactRepeatedItems(dist, 50, u, (reps, rep) => `${reps}x${rep}${u} continuous ${kickMode}${fins}; no stop at 25${u}`, "easy kick to complete the block");
+        items.push(`Cycle 2 continuous 50${u} repeats: first repeat = 25${u} easy line + 25${u} strong line; second repeat = 25${u} streamline/body-line focus + 25${u} fast clean kick. Any underwater component starts only from the actual wall push-off; surface for the remainder of the first 25${u}, then transition to fast kicking without stopping.`);
+        return items;
+      }
       const items = exactRepeatedItems(dist, 25, u, (reps, rep) => `${reps}x${rep}${u} ${kickMode}${fins}`, "easy kick to complete the block");
       items.push("Cycle 4 reps: easy line · strong line · underwater/streamline focus · fast clean kick."); return items;
     }},
@@ -586,11 +591,19 @@ function genKickSet(profile, dist, u) {
     }},
     { id: "broken-kick", build: () => {
       const roundDistance = 200; const rounds = Math.floor(dist / roundDistance); const used = rounds * roundDistance;
+      if (poolSize(profile) === 50) {
+        const items = rounds > 0 ? [`${rounds} rounds: 1x100${u} controlled kick${fins} + 2x50${u} continuous quality/reset kick${fins}`, `Each quality 50${u}: first 25${u} faster quality kick + second 25${u} easy reset; no stop at 25${u}. Reset at the wall after completing each 50${u}, before the next quality repeat. This long-course adaptation prioritizes short quality efforts, with less fast distance than the short-course version.`] : [];
+        return addRemainder(items, dist - used, u, "easy/steady kick to complete the block");
+      }
       const items = rounds > 0 ? [`${rounds} rounds: 2x50${u} strong kick${fins} + 4x25${u} quality kick${fins}`, "Short reps are faster; 50s stay controlled and technically stable."] : [];
       return addRemainder(items, dist - used, u, "easy/steady kick to complete the block");
     }},
     { id: "power-25-reset", build: () => {
       const round = 100; const rounds = Math.floor(dist / round); const used = rounds * round;
+      if (poolSize(profile) === 50) {
+        const items = rounds > 0 ? [`${rounds} rounds: 2x50${u} continuous power/reset kick`, `Each 50${u}: first 25${u} strong, crisp quality kick + second 25${u} easy alignment/reset; no stop at 25${u}. Reset at the wall after completing each 50${u}, before the next repeat.`] : [];
+        return addRemainder(items, dist-used, u, "easy kick reset to complete the block");
+      }
       const items = rounds > 0 ? [`${rounds} rounds: 2x25${u} strong kick + 2x25${u} easy line`, "Power reps are crisp; easy reps restore range and alignment."] : [];
       return addRemainder(items, dist-used, u, "easy kick reset to complete the block");
     }},
@@ -611,10 +624,14 @@ function genDrillSet(profile, dist, u) {
   const paddles = withPaddles(profile.equipment);
   const variants = [
     { id: "alternate-50", build: () => exactRepeatedItems(dist, 50, u, (reps, rep) => `${reps}x${rep}${u}${paddles} alternating drill and swim`, "easy drill/swim to complete the block") },
-    { id: "25-drill-swim", build: () => exactRepeatedItems(dist, 25, u, (reps, rep) => `${reps}x${rep}${u} drill/swim skill transfer`, "easy skill transfer to complete the block") },
+    { id: "25-drill-swim", build: () => poolSize(profile) === 50
+      ? exactRepeatedItems(dist, 50, u, (reps, rep) => `${reps}x${rep}${u} continuous: first 25${u} drill + second 25${u} swim; no stop at 25${u}`, "easy skill transfer to complete the block")
+      : exactRepeatedItems(dist, 25, u, (reps, rep) => `${reps}x${rep}${u} drill/swim skill transfer`, "easy skill transfer to complete the block") },
     { id: "100-skill-blocks", build: () => exactRepeatedItems(dist, 100, u, (reps, rep) => `${reps}x${rep}${u} technical blocks`, "easy drill/swim to complete the block") },
     { id: "scull-transfer", build: () => exactRepeatedItems(dist, 50, u, (reps, rep) => `${reps}x${rep}${u} skill transfer`, "easy technical choice to complete the block") },
-    { id: "cue-by-25", build: () => exactRepeatedItems(dist, 25, u, (reps, rep) => `${reps}x${rep}${u} one-cue precision`, "easy technical choice to complete the block") },
+    { id: "cue-by-25", build: () => poolSize(profile) === 50
+      ? exactRepeatedItems(dist, 50, u, (reps, rep) => `${reps}x${rep}${u} continuous one-cue precision: first 25${u} focus on the cue + second 25${u} maintain the same cue; no stop at 25${u}`, "easy technical choice to complete the block")
+      : exactRepeatedItems(dist, 25, u, (reps, rep) => `${reps}x${rep}${u} one-cue precision`, "easy technical choice to complete the block") },
     { id: "drill-build-free", build: () => exactRepeatedItems(dist, 50, u, (reps, rep) => `${reps}x${rep}${u} as drill/build or drill/swim`, "easy skill transfer to complete the block") },
   ];
   const items = pickFresh(profile, "drill", variants).build();
@@ -632,7 +649,10 @@ function genPullSet(profile, dist, u) {
     { id: "50-descend", build: () => { const items=exactRepeatedItems(dist,50,u,(reps,rep)=>`${reps}x${rep}${u} ${base}${paddles}`,"easy pull to complete the block"); items.push("Descend 1-3 from smooth to strong, then reset. Keep stroke length stable."); return items;}},
     { id: "200-negative", build: () => { const items=exactRepeatedItems(dist,200,u,(reps,rep)=>`${reps}x${rep}${u} ${base}${paddles} negative split`,"easy/steady pull to complete the block"); items.push("Second half slightly faster while maintaining catch position and hip stability."); return items;}},
     { id: "mixed-aerobic", build: () => { const rd=300, rounds=Math.floor(dist/rd), used=rounds*rd; const items=rounds>0?[`${rounds} rounds: 1x200${u} aerobic pull + 2x50${u} strong clean pull`,"The 50s add pressure; the 200 protects aerobic continuity."]:[]; return addRemainder(items,dist-used,u,"easy/steady pull to complete the block");}},
-    { id: "25-pressure", build: () => { const items=exactRepeatedItems(dist,25,u,(reps,rep)=>`${reps}x${rep}${u} ${base}${paddles} catch-pressure focus`,"easy pull to complete the block"); items.push("Alternate smooth pressure and stronger pressure; no slipping at the front of the stroke."); return items;}},
+    { id: "25-pressure", build: () => {
+      if (poolSize(profile) === 50) return exactRepeatedItems(dist,50,u,(reps,rep)=>`${reps}x${rep}${u} continuous ${base}${paddles}: first 25${u} smooth pressure + second 25${u} stronger pressure; no stop at 25${u}; no slipping at the front of the stroke`,"easy pull to complete the block");
+      const items=exactRepeatedItems(dist,25,u,(reps,rep)=>`${reps}x${rep}${u} ${base}${paddles} catch-pressure focus`,"easy pull to complete the block"); items.push("Alternate smooth pressure and stronger pressure; no slipping at the front of the stroke."); return items;
+    }},
     { id: "150-control", build: () => { const items=exactRepeatedItems(dist,150,u,(reps,rep)=>`${reps}x${rep}${u} ${base}${paddles} controlled aerobic`,"easy pull to complete the block"); items.push("Each rep: settle first third, hold middle third, finish with slightly firmer pressure."); return items;}},
   ];
   const items = pickFresh(profile, isBuildKickPull(profile) ? "pull-build" : "pull", variants).build();
@@ -816,9 +836,22 @@ function genCoolDown(profile, dist, u) {
   const specialist = specialistText(profile);
   const variants = [
     { id: "continuous", build: () => [`${dist}${u} easy freestyle/choice, change stroke or drill every 50-100${u}`, "Long relaxed stroke, low heart rate, easy breathing."] },
-    { id: "split", build: () => { const first=Math.floor(dist*0.6/25)*25; const second=dist-first; return [`${first}${u} easy freestyle/choice, long relaxed stroke`, `${second}${u} choice drill/backstroke easy, deep relaxed breathing`]; } },
+    { id: "split", build: () => {
+      const step=poolSize(profile); const first=Math.floor(dist*0.6/step)*step; const second=dist-first;
+      const items=[];
+      if (first>0) items.push(`${first}${u} easy freestyle/choice, long relaxed stroke`);
+      if (second>0) items.push(`${second}${u} choice drill/backstroke easy, deep relaxed breathing`);
+      return items;
+    } },
     { id: "50-reset", build: () => { const items=exactRepeatedItems(dist,50,u,(reps,rep)=>`${reps}x${rep}${u} recovery reset`,"very easy choice"); items.push("Odd: easy free/choice · Even: backstroke or drill. No pace target."); return items;} },
-    { id: "25-release", build: () => { const items=exactRepeatedItems(dist,25,u,(reps,rep)=>`${reps}x${rep}${u} very easy release`,"very easy choice"); items.push("Alternate long stroke, backstroke and simple drill; finish with calm breathing."); return items;} },
+    { id: "25-release", build: () => {
+      if (poolSize(profile) === 50) {
+        const items=exactRepeatedItems(dist,50,u,(reps,rep)=>`${reps}x${rep}${u} continuous very easy release; no stop at 25${u}`,"very easy choice");
+        items.push(`Cycle 3 continuous 50${u} repeats: 25${u} long stroke + 25${u} backstroke; 25${u} simple drill + 25${u} long stroke; 25${u} backstroke + 25${u} simple drill. Finish with calm breathing.`);
+        return items;
+      }
+      const items=exactRepeatedItems(dist,25,u,(reps,rep)=>`${reps}x${rep}${u} very easy release`,"very easy choice"); items.push("Alternate long stroke, backstroke and simple drill; finish with calm breathing."); return items;
+    } },
     { id: "breathing-reset", build: () => [`${dist}${u} easy choice with breathing reset`, "Reduce stroke rate gradually; use relaxed exhalation and long body line." ] },
     { id: "mixed-recovery", build: () => { const items=exactRepeatedItems(dist,50,u,(reps,rep)=>`${reps}x${rep}${u} mixed recovery`,"very easy choice"); items.push("Cycle easy free · backstroke · drill · choice. No hard kicking or resisted work."); return items;} },
   ];
