@@ -1,4 +1,5 @@
 import { generateCoachBrain } from "./coachBrain";
+import { planStructuredMainSet, renderMainSetPlan } from "./mainSetPlanner";
 
 function createSessionId() {
   if (typeof crypto !== "undefined" && crypto.randomUUID) {
@@ -657,13 +658,8 @@ function genMainSet(profile, dist, u, paceTarget) {
   if (hasRaceFocus(profile)) return buildRaceSpecificMain(profile, dist, u, paceTarget);
 
   if (intensity === "recovery") {
-    const variants = [
-      { id: "100-easy", build: () => { const items=exactRepeatedItems(dist,100,u,(reps,rep)=>`${reps}x${rep}${u} freestyle/choice easy`,"very easy choice to complete the block"); items.push(`Technique priority only; use short clean ${specialist} inserts if desired.`); return items;} },
-      { id: "200-easy", build: () => { const items=exactRepeatedItems(dist,200,u,(reps,rep)=>`${reps}x${rep}${u} easy aerobic recovery`,"very easy choice to complete the block"); items.push("Change stroke or drill every 50; keep breathing relaxed and effort conversational."); return items;} },
-      { id: "50-reset", build: () => { const items=exactRepeatedItems(dist,50,u,(reps,rep)=>`${reps}x${rep}${u} easy reset`,"very easy choice to complete the block"); items.push("Odd reps long relaxed swim · even reps choice drill/backstroke."); return items;} },
-      { id: "25-release", build: () => { const items=exactRepeatedItems(dist,25,u,(reps,rep)=>`${reps}x${rep}${u} low-load movement quality`,"very easy choice to complete the block"); items.push("Use short repeats only to improve feel, alignment and breathing — never to add intensity."); return items;} },
-    ];
-    return pickFresh(profile, "main-recovery", variants).build();
+    const plan = planStructuredMainSet(profile, dist, variants => pickFresh(profile, "main-recovery", variants));
+    return renderMainSetPlan(plan, profile, dist, u);
   }
 
   if (profile.goal === "sprint") {
@@ -749,15 +745,8 @@ function genMainSet(profile, dist, u, paceTarget) {
   }
 
   if (profile.goal === "technique") {
-    const variants = [
-      { id: "25-25", build: () => { const items=exactRepeatedItems(dist,50,u,(reps,rep)=>`${reps}x${rep}${u} as 25 technical focus + 25 swim`,"easy technical choice to complete the block"); items.push(`Every 4th rep may include ${specialist} if skill quality remains stable.`); return items;} },
-      { id: "drill-build-100", build: () => { const items=exactRepeatedItems(dist,100,u,(reps,rep)=>`${reps}x${rep}${u} skill transfer`,"easy technical choice to complete the block"); items.push(`25 drill + 25 swim + 25 build + 25 ${specialist}/choice maintaining the same technical cue.`); return items;} },
-      { id: "tempo-control", build: () => { const items=exactRepeatedItems(dist,50,u,(reps,rep)=>`${reps}x${rep}${u} technique with tempo control`,"easy technical choice to complete the block"); items.push("Alternate long-stroke/low-rate and slightly faster race-shaped rhythm without losing line."); return items;} },
-      { id: "turn-skill", build: () => { const items=exactRepeatedItems(dist,50,u,(reps,rep)=>`${reps}x${rep}${u} skill precision`,"easy technical choice to complete the block"); items.push("Cycle focus: entry/catch · body line · turn approach · breakout. Swim easy between high-attention reps."); return items;} },
-      { id: "single-cue-25", build: () => { const items=exactRepeatedItems(dist,25,u,(reps,rep)=>`${reps}x${rep}${u} single-cue technical repeats`,"easy technical choice to complete the block"); items.push("Keep one cue for 4-8 reps, then change only after the athlete can reproduce it."); return items;} },
-      { id: "skill-under-speed", build: () => { const items=exactRepeatedItems(dist,50,u,(reps,rep)=>`${reps}x${rep}${u} skill under controlled speed`,"easy technical choice to complete the block"); items.push("First 25 precise, second 25 slightly faster while preserving the same movement pattern."); return items;} },
-    ];
-    return pickFresh(profile, "main-technique", variants).build();
+    const plan = planStructuredMainSet(profile, dist, variants => pickFresh(profile, "main-technique", variants));
+    return renderMainSetPlan(plan, profile, dist, u);
   }
 
   const enduranceVariants = [
