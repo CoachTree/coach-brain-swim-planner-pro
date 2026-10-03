@@ -535,6 +535,19 @@ toast.success("Session ready");
               favouriteStore={favouriteStore}
             />
           )}
+          {(originalSession || loading) && (
+            <div className="mt-6 text-center">
+              <Button
+                onClick={handleGenerate}
+                disabled={!canSubmit}
+                data-testid="generate-another-button"
+                className="w-full h-14 rounded-sm bg-[#003366] hover:bg-[#002244] text-white font-display font-bold tracking-wide text-base disabled:opacity-60"
+              >
+                {loading ? "Building session…" : "Generate Another Session"}
+              </Button>
+              <p className="mt-2 text-sm text-[#475569]">Same settings. A different session.</p>
+            </div>
+          )}
         </div>
 
         {!access.isPro && <div className="mt-14"><ProGate feature="Coach Library" access={access} onOpenAccount={() => setAccountPanelOpenSignal((value) => value + 1)} /></div>}

@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import SwimPlanner from "@/pages/SwimPlanner";
 import { toast } from "sonner";
 import { GENERATE_STORAGE_KEY, trackGenerateSession } from "./generateAnalytics";
+import * as sessionGenerator from "./sessionGenerator";
 
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }));
 jest.mock("jspdf", () => ({ jsPDF: jest.fn() }));
@@ -99,6 +100,7 @@ test("only the analytics key is read or written", () => {
 });
 
 test.each([false, true])("one real Generate click sends once and shows a result (analytics throws: %s)", async (throws) => {
+  const generate = jest.spyOn(sessionGenerator, "generateSession");
   if (throws) window.gtag.mockImplementation(() => { throw new Error("Analytics failed"); });
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -106,6 +108,7 @@ test.each([false, true])("one real Generate click sends once and shows a result 
   try {
     await act(async () => root.render(<React.StrictMode><SwimPlanner /></React.StrictMode>));
     const button = container.querySelector('[data-testid="generate-button"]');
+    expect(container.querySelector('[data-testid="generate-another-button"]')).toBeNull();
     await act(async () => button.click());
     expect(button.disabled).toBe(true);
     await act(async () => jest.advanceTimersByTime(60));
@@ -115,6 +118,27 @@ test.each([false, true])("one real Generate click sends once and shows a result 
     expect(toast.success).toHaveBeenCalledWith("Session ready");
     expect(toast.error).not.toHaveBeenCalled();
     expect(button.disabled).toBe(false);
+    const another = container.querySelector('[data-testid="generate-another-button"]');
+    expect(another.textContent).toBe("Generate Another Session");
+    expect(container.textContent).toContain("Same settings. A different session.");
+    expect(generate).toHaveBeenCalledTimes(1);
+    await act(async () => another.click());
+    expect(another.disabled).toBe(true);
+    expect(button.disabled).toBe(true);
+    await act(async () => another.click());
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(window.gtag).toHaveBeenCalledTimes(1);
+    await act(async () => jest.advanceTimersByTime(60));
+    expect(generate).toHaveBeenCalledTimes(2);
+    expect(generate.mock.calls[1]).toEqual(generate.mock.calls[0]);
+    expect(generate.mock.results[1].value.session_id).not.toBe(generate.mock.results[0].value.session_id);
+    expect(window.gtag).toHaveBeenCalledTimes(2);
+    expect(window.gtag.mock.calls[1]).toEqual(["event", "generate_session", {
+      ...window.gtag.mock.calls[0][2], generate_type: "same_day_repeat",
+    }]);
+    expect(container.querySelector("#session-result").textContent).toContain("Session output");
+    expect(another.disabled).toBe(false);
+    expect(toast.error).not.toHaveBeenCalled();
   } finally {
     await act(async () => root.unmount());
     container.remove();
