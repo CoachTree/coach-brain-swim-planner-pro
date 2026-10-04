@@ -1,4 +1,9 @@
+import "core-js/actual/structured-clone";
 import React, { act } from "react";
+import { IDBFactory, IDBKeyRange } from "fake-indexeddb";
+import * as performanceStorage from "@/lib/localPerformanceStore";
+import { useCoachAccess } from "@/hooks/useCoachAccess";
+import { Athletes as CloudAthletes } from "@/lib/cloudStore";
 import { createRoot } from "react-dom/client";
 import { jsPDF } from "jspdf";
 import { toast } from "sonner";
@@ -10,14 +15,14 @@ import * as draftLifecycle from "@/lib/sessionDraft";
 
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn(), info: jest.fn() } }));
 jest.mock("jspdf", () => ({ jsPDF: jest.fn() }));
-jest.mock("@/hooks/useCoachAccess", () => ({ useCoachAccess: () => ({ isPro: true, user: null, configured: false }) }));
+jest.mock("@/hooks/useCoachAccess", () => ({ useCoachAccess: jest.fn() }));
 jest.mock("@/lib/supabaseClient", () => ({ supabase: null }));
 jest.mock("@/lib/sessionGenerator", () => ({ generateSession: jest.fn() }));
 jest.mock("@/components/auth/AccountPanel", () => () => null);
 jest.mock("@/components/swim/CommunityHub", () => () => <div>Community view</div>);
 jest.mock("@/components/swim/SeasonPlanner", () => () => <div>Season view</div>);
 global.IS_REACT_ACT_ENVIRONMENT = true;
-let container, root, pdf, serial;
+let container, root, pdf, serial, performanceStore;
 const query = id => document.querySelector(`[data-testid="${id}"]`);
 const click = async id => { expect(query(id)).not.toBeNull(); await act(async () => query(id).click()); };
 const tab = async name => {
@@ -41,6 +46,10 @@ const editedLine = async () => { await startEdit(); await change("edit-item-main
 
 beforeEach(async () => {
   jest.useFakeTimers(); localStorage.clear(); jest.clearAllMocks(); serial = 0;
+  useCoachAccess.mockReturnValue({ isPro: true, user: null, configured: false });
+  performanceStore = performanceStorage.createLocalPerformanceStore({ indexedDB: new IDBFactory(), IDBKeyRange });
+  jest.spyOn(performanceStorage, "createLocalPerformanceStore").mockReturnValue(performanceStore);
+  jest.spyOn(performanceStore, "startRecording"); jest.spyOn(performanceStore, "saveProgress"); jest.spyOn(performanceStore, "getRecording");
   HTMLElement.prototype.scrollIntoView = jest.fn();
   window.gtag = jest.fn();
   jest.spyOn(window, "prompt").mockReturnValue("Saved snapshot");
@@ -197,4 +206,68 @@ test("generation captures equipment and pace in working context without extendin
   await tab("Session History"); await click(`session-open-${saved.id}`);
   const loaded = create.mock.results.at(-1).value;
   expect(loaded.context.equipment).toBeUndefined(); expect(loaded.context.paceTarget).toBeUndefined();
+});
+
+const flushPerformance = async method => { await act(async () => { await performanceStore[method].mock.results.at(-1).value; }); };
+async function confirmPerformance(count = "1") {
+  await change("performance-athleteId", "b"); await change("performance-task", "swim");
+  await change("performance-count", count); await change("performance-distance", "100");
+  await click("performance-confirmed"); await click("performance-start"); await flushPerformance("startRecording");
+}
+test("builder → recording → finish stays private in Save/Favourite/Copy/PDF/Share/Journal/GA4; modal protects replacement", async () => {
+  await change("session-athlete-select", "a"); await click("pool-type-tile-25"); await generate();
+  await change("session-athlete-select", "b"); await click("pool-type-tile-50");
+  jest.useRealTimers(); const cryptoBefore = globalThis.crypto;
+  Object.defineProperty(globalThis, "crypto", { configurable: true, value: require("crypto").webcrypto });
+  try {
+    await click("record-results");
+    expect(query("performance-athleteId").value).toBe(""); expect(query("performance-pool").value).toBe("25");
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull(); expect(document.body.style.pointerEvents).toBe("none");
+    await click("generate-another-button"); expect(generateSession).toHaveBeenCalledTimes(1);
+    await confirmPerformance(); expect(query("performance-recorder")).not.toBeNull();
+    const start = performanceStore.startRecording.mock.calls[0][0];
+    expect(start.athleteRef).toEqual({ store: "local", id: "b" }); expect(start.scopeKey).toBe("device:browser-local");
+    expect(start.source).toEqual({ sessionId: "generated-1", blockId: "main_set", draftRevision: 0, changeSequence: 0 });
+    await change("performance-time", "67.23"); await click("performance-save"); await flushPerformance("saveProgress");
+    await act(async () => [...document.querySelectorAll("button")].find(b => b.textContent === "Finish").click()); await flushPerformance("saveProgress");
+    expect(query("performance-summary").textContent).toContain("Completed 1/1");
+    await act(async () => [...document.querySelectorAll("button")].find(b => b.textContent === "Close summary").click());
+    await click("save-session-button"); await click("favourite-button"); await click("copy-button");
+    const copy = navigator.clipboard.writeText.mock.calls.at(-1)[0];
+    await click("export-pdf-button"); await click("share-button");
+    const payload = decodeShare(new URLSearchParams(navigator.clipboard.writeText.mock.calls.at(-1)[0].split("?")[1]).get("data"));
+    const saved = SavedSessions.list()[0]; expect(saved.profile.athleteId).toBe("a"); expect(payload.session).toEqual(saved.session); expect(Favourites.list()[0].session).toEqual(saved.session);
+    for (const data of [saved, payload, copy, pdf.text.mock.calls, window.gtag.mock.calls, Object.values(localStorage)]) {
+      const serialized = JSON.stringify(data); expect(serialized).not.toContain(start.performanceId); expect(serialized).not.toContain("67.23"); expect(serialized).not.toContain("plannedDefinition");
+    }
+    expect(window.gtag).toHaveBeenCalledTimes(1);
+    const persisted = await performanceStore.getRecording({ scopeKey: start.scopeKey, performanceId: start.performanceId }); expect(persisted.performance.reps[0].time.hundredths).toBe(6723);
+  } finally { Object.defineProperty(globalThis, "crypto", { configurable: true, value: cryptoBefore }); }
+});
+
+test("known draft resumes outside keyed result after session replacement without rebinding athlete or snapshot", async () => {
+  await generate(); jest.useRealTimers(); const cryptoBefore = globalThis.crypto;
+  Object.defineProperty(globalThis, "crypto", { configurable: true, value: require("crypto").webcrypto });
+  try {
+    await click("record-results"); await confirmPerformance("8");
+    await change("performance-time", "67.2"); await click("performance-save"); await flushPerformance("saveProgress");
+    await act(async () => [...document.querySelectorAll("button")].find(b => b.textContent === "Save draft and close").click());
+    await click("performance-confirm-action"); await flushPerformance("saveProgress");
+    expect(query("performance-resume").textContent).toBe("Resume recording");
+    jest.useFakeTimers(); await change("session-athlete-select", "a"); await generate(); jest.useRealTimers();
+    await tab("Community"); await click("performance-resume"); await flushPerformance("getRecording");
+    expect(query("performance-recorder").textContent).toContain("Athlete B"); expect(query("performance-recorder").textContent).toContain("Rep 2 of 8");
+    expect(performanceStore.startRecording).toHaveBeenCalledTimes(1);
+  } finally { Object.defineProperty(globalThis, "crypto", { configurable: true, value: cryptoBefore }); }
+});
+
+test("Free entry is hidden; account roster selection is explicit and cannot reuse old scope athletes", async () => {
+  await generate(); useCoachAccess.mockReturnValue({ isPro: false, user: null, configured: false });
+  await act(async () => root.render(<SwimPlanner />)); expect(query("record-results")).toBeNull();
+  let resolveRoster; jest.spyOn(CloudAthletes, "list").mockImplementation(() => new Promise(resolve => { resolveRoster = resolve; }));
+  useCoachAccess.mockReturnValue({ isPro: true, user: { id: "account-a" }, configured: false });
+  await act(async () => root.render(<SwimPlanner />)); await click("record-results");
+  expect(query("performance-start").disabled).toBe(true); expect(query("performance-athleteId").options).toHaveLength(1);
+  await act(async () => resolveRoster([{ id: "cloud-a", name: "Cloud athlete" }]));
+  expect([...query("performance-athleteId").options].map(o => o.value)).toEqual(["", "cloud-a"]);
 });

@@ -26,6 +26,11 @@ import { Favourites as LocalFavourites } from "@/lib/localStore";
 import { useCoachAccess } from "@/hooks/useCoachAccess";
 
 import { useSessionDraft } from "@/hooks/useSessionDraft";
+import { usePerformanceRecorder } from "@/hooks/usePerformanceRecorder";
+import PerformanceConfirmation from "@/components/swim/PerformanceConfirmation";
+import PerformanceRecorder from "@/components/swim/PerformanceRecorder";
+import PerformanceSummary from "@/components/swim/PerformanceSummary";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { cloneDraftValue } from "@/lib/sessionDraft";
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from "@/components/ui/alert-dialog";
 
@@ -99,6 +104,7 @@ export default function SwimPlanner() {
   const [activeTab, setActiveTab] = useState("session");
   const [accountPanelOpenSignal, setAccountPanelOpenSignal] = useState(0);
   const [athletes, setAthletes] = useState([]);
+  const [athleteRosterScope, setAthleteRosterScope] = useState(null);
   const [selectedAthleteId, setSelectedAthleteId] = useState("");
   const [age, setAge] = useState(DEFAULT_AGE);
   const [level, setLevel] = useState("intermediate");
@@ -122,12 +128,28 @@ export default function SwimPlanner() {
   const sessionScope = `${access.user?.id || "guest"}:${access.isPro ? "pro" : "free"}`;
   const athleteStore = access.isPro && access.user ? CloudAthletes : LocalAthletes;
   const favouriteStore = selectFavouriteStore(access, LocalFavourites, CloudFavourites);
+  const performanceScope = access.isPro && access.user ? `account:${access.user.id}` : "device:browser-local";
+  const rosterScopeRef = useRef(performanceScope);
+  rosterScopeRef.current = performanceScope;
+  const performanceAthletes = athleteRosterScope === performanceScope ? athletes.filter(a => /^[A-Za-z0-9_-]{1,128}$/.test(String(a.id || ""))) : [];
+  const recorder = usePerformanceRecorder({ scopeKey: performanceScope, athleteStore: access.isPro && access.user ? "supabase" : "local",
+    athletes: performanceAthletes, enabled: access.isPro && !access.loading });
+  const performanceOpen = recorder.state.phase !== "closed";
+  const performanceReturnFocus = useRef(null);
+  const openRecorder = block => {
+    if (!draft || loading) return;
+    performanceReturnFocus.current = document.activeElement;
+    recorder.open({ sessionId: /^[A-Za-z0-9_-]{1,128}$/.test(draft.workingDraft.session_id || "") ? draft.workingDraft.session_id : null,
+      blockId: block.generatedKey, draftRevision: draft.revision, changeSequence: draft.changeSequence,
+      plannedTextSnapshot: block.items || [] },
+    { unit: draft.context.unit, poolLength: draft.context.poolLength, stroke: draft.context.stroke });
+  };
 
   useEffect(() => {
     let active = true;
     Promise.resolve(athleteStore.list())
       .then((records) => {
-        if (active) setAthletes(records);
+        if (active) { setAthletes(records); setAthleteRosterScope(performanceScope); }
       })
       .catch(() => {
         if (active) toast.error("Could not load athletes.");
@@ -136,11 +158,11 @@ export default function SwimPlanner() {
     return () => {
       active = false;
     };
-  }, [athleteStore]);
+  }, [athleteStore, performanceScope]);
 
   const refreshAthletes = async () => {
     const records = await athleteStore.list();
-    setAthletes(records);
+    if (rosterScopeRef.current === performanceScope) { setAthletes(records); setAthleteRosterScope(performanceScope); }
     return records;
   };
 
@@ -257,6 +279,7 @@ team: athletes.find(
   };
 
   const requestReplacement = (request) => {
+    if (performanceOpen) return;
     if (generationInFlight.current) return;
     const snapshot = cloneDraftValue(request);
     if (draft?.dirty) setReplacementRequest(snapshot);
@@ -277,6 +300,25 @@ team: athletes.find(
 
   return (
     <div className="min-h-screen bg-white" data-testid="swim-planner-page">
+      <Dialog open={performanceOpen} onOpenChange={open => { if (!open) recorder.requestClose(); }}>
+        <DialogContent className="max-w-2xl max-h-[90dvh] overflow-y-auto p-4 sm:p-6 [&>button]:h-12 [&>button]:w-12" onInteractOutside={e => e.preventDefault()}
+          onCloseAutoFocus={e => {
+            e.preventDefault();
+            const previous = performanceReturnFocus.current;
+            (previous?.isConnected && previous !== document.body ? previous : document.querySelector('[data-testid="performance-resume"], [data-testid="record-results"], [data-testid="generate-button"]'))?.focus();
+          }}>
+          <DialogTitle className="pr-12">{recorder.state.phase === "confirm" ? "Confirm Performance Segment" : recorder.state.phase === "summary" ? "Saved performance" : "Poolside Recorder"}</DialogTitle>
+          <DialogDescription>Record one athlete’s confirmed segment. Stored on this device.</DialogDescription>
+          {recorder.state.phase === "confirm" && <PerformanceConfirmation athletes={performanceAthletes} state={recorder.state} onStart={recorder.start} />}
+          {recorder.state.phase === "record" && <PerformanceRecorder key={recorder.state.viewKey} controller={recorder} />}
+          {recorder.state.phase === "summary" && <PerformanceSummary recording={recorder.state.recording} athleteLabel={recorder.state.athleteLabel} onClose={recorder.requestClose} />}
+        </DialogContent>
+      </Dialog>
+      {recorder.state.recording && !performanceOpen && <div className="max-w-2xl mx-auto px-4 py-3 border" data-testid="performance-resume-panel">
+        <p>{recorder.state.athleteLabel} · {recorder.state.recording.occurrence.plannedDefinition.segment.repeatCount} × {recorder.state.recording.occurrence.plannedDefinition.segment.repeatDistance}{recorder.state.recording.occurrence.plannedDefinition.unit} · Stored on this device</p>
+        <button data-testid="performance-resume" disabled={recorder.state.busy} className="min-h-12 font-bold underline" onClick={e => { performanceReturnFocus.current = e.currentTarget; recorder.resume(); }}>{recorder.state.recording.performance.status === "draft" ? "Resume recording" : "View saved summary"}</button>
+        {recorder.state.error && <p role="alert">{recorder.state.error.message}</p>}
+      </div>}
       <AlertDialog open={Boolean(replacementRequest)} onOpenChange={(open) => { if (!open) setReplacementRequest(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -530,6 +572,7 @@ team: athletes.find(
               profile={draft.profile}
               defaultFavouriteId={draft.favouriteId}
               onFavouriteChange={setFavouriteId}
+              onRecordResults={!loading && recorder.state.recording?.performance.status !== "draft" ? openRecorder : undefined}
               isPro={access.isPro}
               sessionStore={sessionStore}
               favouriteStore={favouriteStore}

@@ -237,6 +237,7 @@ export default function SessionResult({
   onReset,
   resetKey,
   onFavouriteChange,
+  onRecordResults,
   profile = {},
   readOnly = false,
   hideShare = false,
@@ -668,6 +669,10 @@ export default function SessionResult({
                   ))}
                 </ul>
               )}
+              {!readOnly && isPro && onRecordResults && b.generatedKey === "main_set" && <div className="mt-4">
+                <button type="button" data-testid="record-results" disabled={editing} onClick={() => onRecordResults(b)} className="min-h-12 w-full rounded border border-[#003366] px-4 font-bold text-[#003366] disabled:opacity-50">Record Results</button>
+                {editing && <p className="mt-2 text-sm">Finish editing before recording.</p>}
+              </div>}
             </section>
           );
         })}

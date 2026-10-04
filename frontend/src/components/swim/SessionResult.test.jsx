@@ -113,3 +113,16 @@ test("legacy edit, add/remove line, numeric total, Save and Reset continue to wo
   await click("reset-button");
   expect(container.querySelector('[data-testid="edit-distance-main_set"]').value).toBe("400");
 });
+
+test("Record Results belongs only beneath the interpreted Main Set; edit mode blocks entry", async () => {
+  const record = jest.fn(); await render(fixture(), "m", { onRecordResults: record, isPro: true });
+  const button = container.querySelector('[data-testid="record-results"]');
+  expect(container.querySelectorAll('[data-testid="record-results"]')).toHaveLength(1);
+  expect(button.closest("section").dataset.testid).toBe("block-main_set");
+  await click("record-results"); expect(record.mock.calls[0][0]).toMatchObject({ generatedKey: "main_set", items: fixture().main_set.items });
+  await click("edit-toggle-button"); expect(button.disabled).toBe(true); expect(container.textContent).toContain("Finish editing before recording.");
+  await click("record-results"); expect(record).toHaveBeenCalledTimes(1);
+});
+test.each([{ readOnly: true }, { isPro: false }, { onRecordResults: undefined }])("Record Results hidden when inappropriate: %o", async props => {
+  await render(fixture(), "m", { onRecordResults: jest.fn(), ...props }); expect(container.querySelector('[data-testid="record-results"]')).toBeNull();
+});
