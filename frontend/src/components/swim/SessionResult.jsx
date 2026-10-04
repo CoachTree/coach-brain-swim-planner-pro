@@ -19,15 +19,12 @@ import { Favourites, SavedSessions } from "@/lib/localStore";
 import JournalPanel from "@/components/swim/JournalPanel";
 import { encodeShare, SHARE_TTL_DAYS } from "@/lib/shareLink";
 
-const BLOCKS = [
-  { key: "warm_up", label: "Warm up" },
-  { key: "drill_set", label: "Drill set" },
-  { key: "kick_set", label: "Kick set" },
-  { key: "sprint_or_pace_set", label: "Speed prep set" },
-  { key: "main_set", label: "Main set" },
-  { key: "pull_set", label: "Pull set" },
-  { key: "cool_down", label: "Cool down" },
-];
+import {
+  LEGACY_BLOCKS,
+  readSessionDocument,
+  readTextItems,
+  sumSessionBlockDistances,
+} from "@/lib/sessionDocument";
 
 function formatDate(d = new Date()) {
   return d.toLocaleDateString(undefined, {
@@ -37,12 +34,9 @@ function formatDate(d = new Date()) {
   });
 }
 
-function unitLabel(profile) {
-  return profile?.unit === "yd" ? "yd" : "m";
-}
-
 function buildPlainText(session, profile) {
-  const u = unitLabel(profile);
+  const document = readSessionDocument(session, profile);
+  const u = document.unit;
   const lines = [];
   lines.push("SWIM TRAINING SESSION");
   lines.push("=".repeat(28));
@@ -53,13 +47,13 @@ function buildPlainText(session, profile) {
   lines.push(
     `Goal: ${profile.goal} | Intensity: ${profile.intensity} | Pool: ${profile.poolType}`,
   );
-  lines.push(`Total: ${session.total_distance_m || profile.distance} ${u}`);
-  if (session.summary) {
+  lines.push(`Total: ${document.totalDistance} ${u}`);
+  if (document.summary) {
     lines.push("");
-    lines.push(session.summary);
+    lines.push(document.summary);
   }
-  if (session.coach_brain) {
-    const cb = session.coach_brain;
+  if (document.coachBrain) {
+    const cb = document.coachBrain;
     lines.push("");
     lines.push("COACH BRAIN");
     lines.push(`Phase: ${cb.phase || ""}`);
@@ -73,23 +67,22 @@ function buildPlainText(session, profile) {
     (cb.coach_adjustment_prompts || []).forEach((q) => lines.push(`  • ${q}`));
   }
   lines.push("");
-  BLOCKS.forEach(({ key, label }) => {
-    const b = session[key];
-    if (!b || (Number(b.distance_m) === 0 && !(b.items || []).length)) return;
-    const tag = b.energy_system ? ` [${b.energy_system}]` : "";
-    lines.push(`${label.toUpperCase()}${tag} — ${b.distance_m} ${u}`);
+  document.blocks.forEach((b) => {
+    const tag = b.energySystem ? ` [${b.energySystem}]` : "";
+    lines.push(`${b.title.toUpperCase()}${tag} — ${b.distance} ${u}`);
     (b.items || []).forEach((it) => lines.push(`  • ${it}`));
     lines.push("");
   });
-  if (session.coaching_points?.length) {
+  if (document.coachingPoints?.length) {
     lines.push("COACHING POINTS");
-    session.coaching_points.forEach((p) => lines.push(`  • ${p}`));
+    document.coachingPoints.forEach((p) => lines.push(`  • ${p}`));
   }
   return lines.join("\n");
 }
 
 function exportPdf(session, profile) {
-  const u = unitLabel(profile);
+  const document = readSessionDocument(session, profile);
+  const u = document.unit;
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
@@ -116,8 +109,8 @@ function exportPdf(session, profile) {
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(13);
-  const totalM = session.total_distance_m || profile.distance;
-  const sessionTitle = session.summary || `${totalM} ${u} ${profile.goal || "training session"}`;
+  const totalM = document.totalDistance;
+  const sessionTitle = document.summary || `${totalM} ${u} ${profile.goal || "training session"}`;
   const metaLines = [
     `Session title: ${sessionTitle}`,
     `Athlete: ${profile.athleteName || "Manual profile"}`,
@@ -137,10 +130,10 @@ function exportPdf(session, profile) {
   });
   y += 8;
 
-  if (session.summary) {
+  if (document.summary) {
     doc.setFont("helvetica", "italic");
     doc.setFontSize(13);
-    doc.splitTextToSize(session.summary, contentW).forEach((line) => {
+    doc.splitTextToSize(document.summary, contentW).forEach((line) => {
       ensureSpace(18);
       doc.text(line, marginX, y);
       y += 18;
@@ -148,8 +141,8 @@ function exportPdf(session, profile) {
     y += 6;
   }
 
-  if (session.coach_brain) {
-    const cb = session.coach_brain;
+  if (document.coachBrain) {
+    const cb = document.coachBrain;
     ensureSpace(90);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(15);
@@ -176,14 +169,12 @@ function exportPdf(session, profile) {
     y += 8;
   }
 
-  BLOCKS.forEach(({ key, label }) => {
-    const b = session[key];
-    if (!b || (Number(b.distance_m) === 0 && !(b.items || []).length)) return;
+  document.blocks.forEach((b) => {
     ensureSpace(40);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(15);
-    const tag = b.energy_system ? `   [${b.energy_system}]` : "";
-    doc.text(`${label.toUpperCase()}${tag}   —   ${b.distance_m} ${u}`, marginX, y);
+    const tag = b.energySystem ? `   [${b.energySystem}]` : "";
+    doc.text(`${b.title.toUpperCase()}${tag}   —   ${b.distance} ${u}`, marginX, y);
     y += 6;
     doc.setLineWidth(0.5);
     doc.line(marginX, y, pageW - marginX, y);
@@ -203,7 +194,7 @@ function exportPdf(session, profile) {
     y += 12;
   });
 
-  if (session.coaching_points?.length) {
+  if (document.coachingPoints?.length) {
     ensureSpace(40);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(15);
@@ -215,7 +206,7 @@ function exportPdf(session, profile) {
 
     doc.setFont("helvetica", "normal");
     doc.setFontSize(13);
-    session.coaching_points.forEach((p) => {
+    document.coachingPoints.forEach((p) => {
       const wrapped = doc.splitTextToSize(p, contentW - 18);
       ensureSpace(18 * wrapped.length);
       doc.text("•", marginX + 4, y);
@@ -242,7 +233,7 @@ function exportPdf(session, profile) {
 }
 
 function deepCloneSession(s) {
-  if (!s) return s;
+  if (!s) return {};
   return {
     ...s,
     session_id:
@@ -250,24 +241,20 @@ function deepCloneSession(s) {
       (typeof crypto !== "undefined" && crypto.randomUUID
         ? crypto.randomUUID()
         : String(Date.now())),
-    warm_up: s.warm_up && { ...s.warm_up, items: [...(s.warm_up.items || [])] },
-    drill_set: s.drill_set && { ...s.drill_set, items: [...(s.drill_set.items || [])] },
-    kick_set: s.kick_set && { ...s.kick_set, items: [...(s.kick_set.items || [])] },
-    sprint_or_pace_set:
-      s.sprint_or_pace_set && {
-        ...s.sprint_or_pace_set,
-        items: [...(s.sprint_or_pace_set.items || [])],
-      },
-    main_set: s.main_set && { ...s.main_set, items: [...(s.main_set.items || [])] },
-    pull_set: s.pull_set && { ...s.pull_set, items: [...(s.pull_set.items || [])] },
-    cool_down: s.cool_down && { ...s.cool_down, items: [...(s.cool_down.items || [])] },
-    coaching_points: [...(s.coaching_points || [])],
+    // Clone valid arrays without normalizing the editable/persisted source.
+    ...Object.fromEntries(LEGACY_BLOCKS
+      .filter(({ key }) => s[key] && typeof s[key] === "object" && !Array.isArray(s[key]))
+      .map(({ key }) => [key, {
+        ...s[key],
+        ...(Array.isArray(s[key].items) ? { items: [...s[key].items] } : {}),
+      }])),
+    coaching_points: Array.isArray(s.coaching_points) ? [...s.coaching_points] : s.coaching_points,
   };
 }
 
 export default function SessionResult({
   originalSession,
-  profile,
+  profile = {},
   readOnly = false,
   hideShare = false,
   defaultFavouriteId = null,
@@ -377,7 +364,7 @@ export default function SessionResult({
   };
 
   const handleSaveSession = async () => {
-    const defaultName = `${session.total_distance_m || profile.distance} ${profile.unit || "m"} · ${profile.stroke} · ${profile.intensity}`;
+    const defaultName = `${document.totalDistance} ${profile.unit || "m"} · ${profile.stroke} · ${profile.intensity}`;
     const name = window.prompt("Name this saved session", defaultName);
     if (!name?.trim()) return;
     try {
@@ -400,7 +387,7 @@ export default function SessionResult({
   const updateItem = useCallback((blockKey, idx, val) => {
     setSession((s) => {
       const next = { ...s };
-      next[blockKey] = { ...s[blockKey], items: [...s[blockKey].items] };
+      next[blockKey] = { ...s[blockKey], items: readTextItems(s[blockKey].items) };
       next[blockKey].items[idx] = val;
       return next;
     });
@@ -412,10 +399,7 @@ export default function SessionResult({
         ...s,
         [blockKey]: { ...s[blockKey], distance_m: Number(val) || 0 },
       };
-      next.total_distance_m = BLOCKS.reduce(
-        (total, block) => total + Number(next[block.key]?.distance_m || 0),
-        0,
-      );
+      next.total_distance_m = sumSessionBlockDistances(next);
       return next;
     });
   }, []);
@@ -423,7 +407,7 @@ export default function SessionResult({
   const addItem = useCallback((blockKey) => {
     setSession((s) => {
       const next = { ...s };
-      next[blockKey] = { ...s[blockKey], items: [...s[blockKey].items, ""] };
+      next[blockKey] = { ...s[blockKey], items: [...readTextItems(s[blockKey].items), ""] };
       return next;
     });
   }, []);
@@ -433,7 +417,7 @@ export default function SessionResult({
       const next = { ...s };
       next[blockKey] = {
         ...s[blockKey],
-        items: s[blockKey].items.filter((_, i) => i !== idx),
+        items: readTextItems(s[blockKey].items).filter((_, i) => i !== idx),
       };
       return next;
     });
@@ -441,7 +425,7 @@ export default function SessionResult({
 
   const updateCoachingPoint = useCallback((idx, val) => {
     setSession((s) => {
-      const points = [...s.coaching_points];
+      const points = readTextItems(s.coaching_points);
       points[idx] = val;
       return { ...s, coaching_points: points };
     });
@@ -450,18 +434,19 @@ export default function SessionResult({
   const addCoachingPoint = useCallback(() => {
     setSession((s) => ({
       ...s,
-      coaching_points: [...(s.coaching_points || []), ""],
+      coaching_points: [...readTextItems(s.coaching_points), ""],
     }));
   }, []);
 
   const removeCoachingPoint = useCallback((idx) => {
     setSession((s) => ({
       ...s,
-      coaching_points: s.coaching_points.filter((_, i) => i !== idx),
+      coaching_points: readTextItems(s.coaching_points).filter((_, i) => i !== idx),
     }));
   }, []);
 
-  const u = unitLabel(profile);
+  const document = readSessionDocument(session, profile);
+  const u = document.unit;
 
   return (
     <article
@@ -473,7 +458,7 @@ export default function SessionResult({
         <div>
           <div className="label-eyebrow text-[#00E5FF]">Session output</div>
           <h3 className="font-display text-2xl sm:text-3xl font-black tracking-tight mt-1">
-            {session.total_distance_m || profile.distance} {u} ·{" "}
+            {document.totalDistance} {u} ·{" "}
             <span className="capitalize">{profile.goal}</span>
           </h3>
           <p className="text-sm text-white/80 mt-1 capitalize">
@@ -560,46 +545,46 @@ export default function SessionResult({
       </div>
 
       {/* Summary */}
-      {session.summary && (
+      {document.summary && (
         <div
           className="px-5 sm:px-6 py-5 border-b border-[#CBD5E1] text-[#0F172A] text-base leading-relaxed"
           data-testid="session-summary"
         >
-          {session.summary}
+          {document.summary}
         </div>
       )}
 
       {/* Coach Brain */}
-      {session.coach_brain && (
+      {document.coachBrain && (
         <section className="px-5 sm:px-6 py-5 border-b border-[#CBD5E1] bg-[#F8FAFC]" data-testid="coach-brain-section">
           <div className="label-eyebrow text-[#003366]">Coach Brain Engine</div>
           <h4 className="font-display text-xl font-black tracking-tight text-[#0F172A] mt-1">
             Today's Objective
           </h4>
-          <p className="mt-2 text-[#0F172A] leading-relaxed">{session.coach_brain.objective}</p>
+          <p className="mt-2 text-[#0F172A] leading-relaxed">{document.coachBrain.objective}</p>
 
           <div className="grid md:grid-cols-2 gap-3 mt-5">
             <div className="border border-[#CBD5E1] bg-white rounded-sm p-4">
               <div className="label-eyebrow text-[#003366]">Technical Focus</div>
-              <p className="mt-1 text-sm text-[#0F172A]">{session.coach_brain.technical_focus}</p>
+              <p className="mt-1 text-sm text-[#0F172A]">{document.coachBrain.technical_focus}</p>
             </div>
             <div className="border border-[#CBD5E1] bg-white rounded-sm p-4">
               <div className="label-eyebrow text-[#003366]">Mental Focus</div>
-              <p className="mt-1 text-sm text-[#0F172A]">{session.coach_brain.mental_focus}</p>
+              <p className="mt-1 text-sm text-[#0F172A]">{document.coachBrain.mental_focus}</p>
             </div>
             <div className="border border-[#CBD5E1] bg-white rounded-sm p-4">
               <div className="label-eyebrow text-[#003366]">Coach Tip</div>
-              <p className="mt-1 text-sm text-[#0F172A]">{session.coach_brain.coach_tip}</p>
+              <p className="mt-1 text-sm text-[#0F172A]">{document.coachBrain.coach_tip}</p>
             </div>
             <div className="border border-[#CBD5E1] bg-white rounded-sm p-4">
               <div className="label-eyebrow text-[#003366]">Athlete Reflection</div>
-              <p className="mt-1 text-sm text-[#0F172A]">{session.coach_brain.athlete_reflection}</p>
+              <p className="mt-1 text-sm text-[#0F172A]">{document.coachBrain.athlete_reflection}</p>
             </div>
           </div>
 
           <div className="mt-4 border-l-4 border-[#00E5FF] bg-white p-4">
-            <div className="label-eyebrow text-[#003366]">Coaching Principle · {session.coach_brain.yuji_principle_title}</div>
-            <p className="mt-1 text-sm text-[#0F172A] leading-relaxed">{session.coach_brain.yuji_principle}</p>
+            <div className="label-eyebrow text-[#003366]">Coaching Principle · {document.coachBrain.yuji_principle_title}</div>
+            <p className="mt-1 text-sm text-[#0F172A] leading-relaxed">{document.coachBrain.yuji_principle}</p>
           </div>
 
           <div className="mt-4 border border-[#CBD5E1] bg-white rounded-sm p-4">
@@ -608,7 +593,7 @@ export default function SessionResult({
               This app creates the base. The coach completes the session through observation, creativity, and adjustment.
             </p>
             <ul className="mt-3 space-y-1 text-sm text-[#0F172A] list-disc pl-5">
-              {(session.coach_brain.coach_adjustment_prompts || []).map((q, idx) => (
+              {(document.coachBrain.coach_adjustment_prompts || []).map((q, idx) => (
                 <li key={`coach-adjustment-${idx}`}>{q}</li>
               ))}
             </ul>
@@ -618,9 +603,8 @@ export default function SessionResult({
 
       {/* Blocks */}
       <div className="divide-y divide-[#CBD5E1]">
-        {BLOCKS.map(({ key, label }) => {
-          const b = session[key];
-          if (!b || (Number(b.distance_m) === 0 && !(b.items || []).length)) return null;
+        {document.blocks.map((b) => {
+          const key = b.generatedKey;
           return (
             <section
               key={key}
@@ -630,14 +614,14 @@ export default function SessionResult({
               <div className="flex items-baseline justify-between gap-3 mb-3">
                 <div className="flex items-center gap-2">
                   <h4 className="font-display text-lg font-bold tracking-tight text-[#0F172A]">
-                    {label}
+                    {b.title}
                   </h4>
-                  {b.energy_system && (
+                  {b.energySystem && (
                     <span
                       data-testid={`energy-badge-${key}`}
                       className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-sm bg-[#003366] text-[#00E5FF] uppercase"
                     >
-                      {b.energy_system}
+                      {b.energySystem}
                     </span>
                   )}
                 </div>
@@ -646,7 +630,7 @@ export default function SessionResult({
                     <Input
                       type="number"
                       min={0}
-                      value={b.distance_m}
+                      value={b.distance}
                       onChange={(e) => updateDistance(key, e.target.value)}
                       data-testid={`edit-distance-${key}`}
                       className="h-9 w-20 rounded-sm border-[#CBD5E1] text-right font-display font-bold p-2"
@@ -655,7 +639,7 @@ export default function SessionResult({
                   </div>
                 ) : (
                   <span className="label-eyebrow text-[#003366]">
-                    {b.distance_m} {u}
+                    {b.distance} {u}
                   </span>
                 )}
               </div>
@@ -710,7 +694,7 @@ export default function SessionResult({
           );
         })}
 
-        {(session.coaching_points?.length > 0 || editing) && (
+        {(document.coachingPoints?.length > 0 || editing) && (
           <section
             className="px-5 sm:px-6 py-5 bg-[#F1F5F9]"
             data-testid="block-coaching-points"
@@ -723,7 +707,7 @@ export default function SessionResult({
             </div>
             {editing ? (
               <div className="space-y-2">
-                {(session.coaching_points || []).map((p, idx) => (
+                {(document.coachingPoints || []).map((p, idx) => (
                   <div
                     key={`cp-edit-${idx}`}
                     className="flex items-start gap-2"
@@ -758,7 +742,7 @@ export default function SessionResult({
               </div>
             ) : (
               <ul className="space-y-2">
-                {session.coaching_points.map((p, idx) => (
+                {document.coachingPoints.map((p, idx) => (
                   <li
                     key={`cp-${idx}-${p.slice(0, 24)}`}
                     className="flex items-start gap-3 text-[#0F172A]"
