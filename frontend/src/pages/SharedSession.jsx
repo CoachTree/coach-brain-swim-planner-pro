@@ -91,7 +91,7 @@ export default function SharedSession() {
               })}
             </p>
             <SessionResult
-              originalSession={state.data.session}
+              session={state.data.session}
               profile={state.data.profile}
               readOnly
               hideShare

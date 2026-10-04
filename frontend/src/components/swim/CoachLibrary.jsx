@@ -120,7 +120,7 @@ export default function CoachLibrary({ favouriteStore = Favourites, onLoadFavour
               items={favourites}
               onLoad={(fav) => {
                 onLoadFavourite?.(fav);
-                toast.success(`Loaded "${fav.name}"`);
+                // The parent reports success only after any replacement confirmation.
               }}
               onRemove={async (id) => {
                 try {

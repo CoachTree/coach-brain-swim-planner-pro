@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Loader2, Waves, ArrowDown, LockKeyhole, Sparkles } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -24,6 +24,10 @@ import { Favourites as CloudFavourites } from "@/lib/cloudStore";
 import { Athletes as LocalAthletes } from "@/lib/localStore";
 import { Favourites as LocalFavourites } from "@/lib/localStore";
 import { useCoachAccess } from "@/hooks/useCoachAccess";
+
+import { useSessionDraft } from "@/hooks/useSessionDraft";
+import { cloneDraftValue } from "@/lib/sessionDraft";
+import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from "@/components/ui/alert-dialog";
 
 const MIN_AGE = 4;
 const MAX_AGE = 99;
@@ -110,8 +114,9 @@ export default function SwimPlanner() {
   const [includeSprintFinisher, setIncludeSprintFinisher] = useState(false);
 
   const [loading, setLoading] = useState(false);
-  const [originalSession, setOriginalSession] = useState(null);
-  const [loadedFavouriteId, setLoadedFavouriteId] = useState(null);
+  const { draft, load: loadDraft, update: updateDraft, reset: resetDraft, setFavouriteId } = useSessionDraft();
+  const [replacementRequest, setReplacementRequest] = useState(null);
+  const generationInFlight = useRef(false);
   const freeTabs = new Set(["session", "community"]);
   const sessionStore = selectSessionStore(access, LocalSessions, CloudSessions);
   const sessionScope = `${access.user?.id || "guest"}:${access.isPro ? "pro" : "free"}`;
@@ -166,17 +171,7 @@ export default function SwimPlanner() {
     setSelectedAthleteId(savedProfile.athleteId || "");
   };
 
-  const handleLoadFavourite = (fav) => {
-    restoreProfile(fav.profile);
-    setOriginalSession(fav.session);
-    setLoadedFavouriteId(fav.id);
-    setActiveTab("session");
-    setTimeout(() => {
-      document
-        .getElementById("session-result")
-        ?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 80);
-  };
+  const handleLoadFavourite = (fav) => requestReplacement({ type: "load", saved: fav, favouriteId: fav.id });
 
   const ageValid = useMemo(
     () => Number(age) >= MIN_AGE && Number(age) <= MAX_AGE,
@@ -224,79 +219,80 @@ team: athletes.find(
     toast.success(`Selected ${athlete.name}`);
   };
 
-  const handleLoadSavedSession = (saved) => {
-    const savedProfile = saved.profile || {};
-    if (typeof savedProfile.age !== "undefined") setAge(savedProfile.age);
-    if (savedProfile.level) setLevel(savedProfile.level);
-    if (savedProfile.stroke) setStroke(savedProfile.stroke);
-    if (savedProfile.goal) setGoal(savedProfile.goal);
-    if (typeof savedProfile.distance !== "undefined") setDistance(savedProfile.distance);
-    if (savedProfile.intensity) setIntensity(savedProfile.intensity);
-    if (savedProfile.sessionRole) setSessionRole(savedProfile.sessionRole);
-    if (savedProfile.unit) setUnit(savedProfile.unit);
-    if (typeof savedProfile.includeSprintFinisher !== "undefined") setIncludeSprintFinisher(Boolean(savedProfile.includeSprintFinisher));
-    if (savedProfile.poolType) setPoolSize(savedProfile.poolType.startsWith("50") ? "50" : "25");
-    setSelectedAthleteId(savedProfile.athleteId || "");
-    setOriginalSession(saved.session);
-    setLoadedFavouriteId(null);
-    setActiveTab("session");
-    toast.success(`Opened "${saved.name}"`);
-    setTimeout(() => {
-      document.getElementById("session-result")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 80);
-  };
+  const handleLoadSavedSession = (saved) => requestReplacement({ type: "load", saved, favouriteId: null });
 
-  const handleGenerate = async () => {
-    if (!ageValid) {
-      toast.error(`Please enter an age between ${MIN_AGE} and ${MAX_AGE}`);
+  const executeReplacement = async (request) => {
+    if (generationInFlight.current) return;
+    if (request.type === "load") {
+      loadDraft(request.saved.session, request.saved.profile || {}, {}, request.favouriteId);
+      restoreProfile(request.saved.profile);
+      setActiveTab("session");
+      toast.success(`${request.favouriteId ? "Loaded" : "Opened"} "${request.saved.name}"`);
+      setTimeout(() => document.getElementById("session-result")?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
       return;
     }
+    generationInFlight.current = true;
     setLoading(true);
-    setOriginalSession(null);
-    // Rule-based local generator — yields a tick so the spinner has time to render.
-    await new Promise((r) => setTimeout(r, 60));
+    // Retain the current draft until the replacement has been generated successfully.
+    await new Promise((resolve) => setTimeout(resolve, 60));
     try {
-      const data = generateSession({
-        age: Number(age),
-        level,
-        stroke,
-        goal,
-        distance,
-        intensity,
-        poolType,
-        unit,
-        equipment,
-        includeSprintFinisher,
-        sessionRole,
-        paceTarget,
-      });
-      setOriginalSession(data);
-
+      const data = generateSession(request.input);
+      loadDraft(data, request.profile, { equipment: request.input.equipment, paceTarget: request.input.paceTarget });
       trackGenerateSession({
-        stroke,
-        goal,
-        level,
-        distance,
-        intensity,
-        pool_type: poolType,
+        stroke: request.input.stroke,
+        goal: request.input.goal,
+        level: request.input.level,
+        distance: request.input.distance,
+        intensity: request.input.intensity,
+        pool_type: request.input.poolType,
       });
-
-setLoadedFavouriteId(null);
-toast.success("Session ready");
-      setTimeout(() => {
-        document
-          .getElementById("session-result")
-          ?.scrollIntoView({ behavior: "smooth", block: "start" });
-      }, 80);
-    } catch (e) {
+      toast.success("Session ready");
+      setTimeout(() => document.getElementById("session-result")?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
+    } catch (error) {
       toast.error("Could not generate session");
     } finally {
+      generationInFlight.current = false;
       setLoading(false);
     }
   };
 
+  const requestReplacement = (request) => {
+    if (generationInFlight.current) return;
+    const snapshot = cloneDraftValue(request);
+    if (draft?.dirty) setReplacementRequest(snapshot);
+    else executeReplacement(snapshot);
+  };
+
+  const handleGenerate = () => {
+    if (!ageValid) {
+      toast.error(`Please enter an age between ${MIN_AGE} and ${MAX_AGE}`);
+      return;
+    }
+    requestReplacement({
+      type: "generate",
+      profile,
+      input: { age: Number(age), level, stroke, goal, distance, intensity, poolType, unit, equipment, includeSprintFinisher, sessionRole, paceTarget },
+    });
+  };
+
   return (
     <div className="min-h-screen bg-white" data-testid="swim-planner-page">
+      <AlertDialog open={Boolean(replacementRequest)} onOpenChange={(open) => { if (!open) setReplacementRequest(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Replace your edited session?</AlertDialogTitle>
+            <AlertDialogDescription>Your current edits will be replaced. Keep editing to return to this draft and save a copy first.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="keep-editing">Keep Editing</AlertDialogCancel>
+            <AlertDialogAction data-testid="replace-draft" onClick={() => {
+              const request = replacementRequest;
+              setReplacementRequest(null);
+              if (request) executeReplacement(request);
+            }}>Replace With New Draft</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       {/* Header */}
       <header className="border-b border-[#CBD5E1] bg-white sticky top-0 z-10">
         <div className="max-w-2xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
@@ -523,19 +519,23 @@ toast.success("Session ready");
           </div>
         </section>
 
-        <div id="session-result" className="mt-14">
-          {originalSession && (
+        <div id="session-result" className="mt-14" data-dirty={draft?.dirty || false} data-revision={draft?.revision || 0}>
+          {draft && (
             <SessionResult
-              key={originalSession.summary + (originalSession.total_distance_m || "")}
-              originalSession={originalSession}
-              profile={profile}
-              defaultFavouriteId={loadedFavouriteId}
+              key={draft.lifecycle}
+              session={draft.workingDraft}
+              onSessionChange={updateDraft}
+              onReset={resetDraft}
+              resetKey={draft.originalDraft}
+              profile={draft.profile}
+              defaultFavouriteId={draft.favouriteId}
+              onFavouriteChange={setFavouriteId}
               isPro={access.isPro}
               sessionStore={sessionStore}
               favouriteStore={favouriteStore}
             />
           )}
-          {(originalSession || loading) && (
+          {(draft || loading) && (
             <div className="mt-6 text-center">
               <Button
                 onClick={handleGenerate}

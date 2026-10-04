@@ -20,7 +20,6 @@ import JournalPanel from "@/components/swim/JournalPanel";
 import { encodeShare, SHARE_TTL_DAYS } from "@/lib/shareLink";
 
 import {
-  LEGACY_BLOCKS,
   readSessionDocument,
   readTextItems,
   sumSessionBlockDistances,
@@ -232,28 +231,12 @@ function exportPdf(session, profile) {
   doc.save(`swim-${totalM}${u}-${safe(profile.stroke)}-${safe(profile.intensity)}.pdf`);
 }
 
-function deepCloneSession(s) {
-  if (!s) return {};
-  return {
-    ...s,
-    session_id:
-      s.session_id ||
-      (typeof crypto !== "undefined" && crypto.randomUUID
-        ? crypto.randomUUID()
-        : String(Date.now())),
-    // Clone valid arrays without normalizing the editable/persisted source.
-    ...Object.fromEntries(LEGACY_BLOCKS
-      .filter(({ key }) => s[key] && typeof s[key] === "object" && !Array.isArray(s[key]))
-      .map(({ key }) => [key, {
-        ...s[key],
-        ...(Array.isArray(s[key].items) ? { items: [...s[key].items] } : {}),
-      }])),
-    coaching_points: Array.isArray(s.coaching_points) ? [...s.coaching_points] : s.coaching_points,
-  };
-}
-
 export default function SessionResult({
-  originalSession,
+  session,
+  onSessionChange,
+  onReset,
+  resetKey,
+  onFavouriteChange,
   profile = {},
   readOnly = false,
   hideShare = false,
@@ -262,7 +245,6 @@ export default function SessionResult({
   favouriteStore = Favourites,
   sessionStore = SavedSessions,
 }) {
-  const [session, setSession] = useState(() => deepCloneSession(originalSession));
   const [editing, setEditingState] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [favouriteId, setFavouriteId] = useState(defaultFavouriteId);
@@ -281,14 +263,8 @@ export default function SessionResult({
     setEditingState(typeof v === "function" ? v(editing) : v);
   };
 
-  // Reset internal state when a fresh generated session arrives.
-  // Calls the underlying state setter directly to keep this effect's dependency
-  // list stable (the `setEditing` wrapper is recreated each render).
-  useEffect(() => {
-    setSession(deepCloneSession(originalSession));
-    setEditingState(false);
-    setFavouriteId(defaultFavouriteId);
-  }, [originalSession, defaultFavouriteId]);
+  useEffect(() => { setEditingState(false); }, [resetKey]);
+  useEffect(() => { setFavouriteId(defaultFavouriteId); }, [resetKey, defaultFavouriteId]);
 
   const text = useMemo(
     () => buildPlainText(session, profile),
@@ -305,7 +281,7 @@ export default function SessionResult({
   };
 
   const handleReset = () => {
-    setSession(deepCloneSession(originalSession));
+    onReset?.();
     toast.success("Reset to original version");
   };
 
@@ -338,6 +314,7 @@ export default function SessionResult({
         const removed = await favouriteStore.remove(favouriteId);
         if (!removed) throw new Error("Could not remove favourite.");
         setFavouriteId(null);
+        onFavouriteChange?.(null);
         toast.success("Removed from favourites");
         return;
       }
@@ -354,6 +331,7 @@ export default function SessionResult({
         return;
       }
       setFavouriteId(saved.id);
+      onFavouriteChange?.(saved.id);
       toast.success("Saved to favourites");
     } catch (error) {
       toast.error(error?.message || (favouriteId ? "Could not remove favourite." : "Could not save favourite."));
@@ -385,16 +363,16 @@ export default function SessionResult({
 
   // ---- edit helpers ----
   const updateItem = useCallback((blockKey, idx, val) => {
-    setSession((s) => {
+    onSessionChange((s) => {
       const next = { ...s };
       next[blockKey] = { ...s[blockKey], items: readTextItems(s[blockKey].items) };
       next[blockKey].items[idx] = val;
       return next;
     });
-  }, []);
+  }, [onSessionChange]);
 
   const updateDistance = useCallback((blockKey, val) => {
-    setSession((s) => {
+    onSessionChange((s) => {
       const next = {
         ...s,
         [blockKey]: { ...s[blockKey], distance_m: Number(val) || 0 },
@@ -402,18 +380,18 @@ export default function SessionResult({
       next.total_distance_m = sumSessionBlockDistances(next);
       return next;
     });
-  }, []);
+  }, [onSessionChange]);
 
   const addItem = useCallback((blockKey) => {
-    setSession((s) => {
+    onSessionChange((s) => {
       const next = { ...s };
       next[blockKey] = { ...s[blockKey], items: [...readTextItems(s[blockKey].items), ""] };
       return next;
     });
-  }, []);
+  }, [onSessionChange]);
 
   const removeItem = useCallback((blockKey, idx) => {
-    setSession((s) => {
+    onSessionChange((s) => {
       const next = { ...s };
       next[blockKey] = {
         ...s[blockKey],
@@ -421,29 +399,29 @@ export default function SessionResult({
       };
       return next;
     });
-  }, []);
+  }, [onSessionChange]);
 
   const updateCoachingPoint = useCallback((idx, val) => {
-    setSession((s) => {
+    onSessionChange((s) => {
       const points = readTextItems(s.coaching_points);
       points[idx] = val;
       return { ...s, coaching_points: points };
     });
-  }, []);
+  }, [onSessionChange]);
 
   const addCoachingPoint = useCallback(() => {
-    setSession((s) => ({
+    onSessionChange((s) => ({
       ...s,
       coaching_points: [...readTextItems(s.coaching_points), ""],
     }));
-  }, []);
+  }, [onSessionChange]);
 
   const removeCoachingPoint = useCallback((idx) => {
-    setSession((s) => ({
+    onSessionChange((s) => ({
       ...s,
       coaching_points: readTextItems(s.coaching_points).filter((_, i) => i !== idx),
     }));
-  }, []);
+  }, [onSessionChange]);
 
   const document = readSessionDocument(session, profile);
   const u = document.unit;

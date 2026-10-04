@@ -75,7 +75,7 @@ test.each([
 ])("%s selects correct repository and supports favourite Save → Remove → Save again → Library Delete", async (_, access, cloud) => {
   const store = selectFavouriteStore(access, LocalFavourites, CloudFavourites);
   expect(store).toBe(cloud ? CloudFavourites : LocalFavourites);
-  await render(<SessionResult originalSession={session} profile={profile} favouriteStore={store} />);
+  await render(<SessionResult session={session} profile={profile} favouriteStore={store} />);
   await click("favourite-button");
   const [saved] = await store.list();
   expect(saved.name).toBe("Keep this favourite name");
@@ -121,7 +121,7 @@ test.each(["false", "throw"])("Delete %s shows an error and retains the row", as
 test.each(["false", "throw"])("toggle delete failure (%s) keeps Saved and retries the same id", async (mode) => {
   const remove = jest.fn(() => mode === "false" ? false : Promise.reject(new Error("Denied")));
   const store = { remove, upsert: jest.fn() };
-  await render(<SessionResult originalSession={session} profile={profile} defaultFavouriteId="existing" favouriteStore={store} />);
+  await render(<SessionResult session={session} profile={profile} defaultFavouriteId="existing" favouriteStore={store} />);
   await click("favourite-button");
   expect(container.querySelector('[data-testid="favourite-button"]').textContent).toBe("Saved");
   expect(toast.error).toHaveBeenCalled();
@@ -137,7 +137,7 @@ test.each(["save", "delete"])("pending %s prevents duplicate requests", async (o
   let resolve;
   const pending = jest.fn(() => new Promise(done => { resolve = done; }));
   const store = { upsert: pending, remove: pending };
-  await render(<SessionResult originalSession={session} profile={profile} defaultFavouriteId={operation === "delete" ? "existing" : null} favouriteStore={store} />);
+  await render(<SessionResult session={session} profile={profile} defaultFavouriteId={operation === "delete" ? "existing" : null} favouriteStore={store} />);
   const button = container.querySelector('[data-testid="favourite-button"]');
   await act(async () => { button.click(); button.click(); });
   expect(pending).toHaveBeenCalledTimes(1);
@@ -152,7 +152,7 @@ test.each(["save", "delete"])("pending %s prevents duplicate requests", async (o
 test.each(["false", "throw", "cancel"])("unsuccessful save (%s) retains Save and releases lock", async (mode) => {
   const store = { upsert: jest.fn(() => mode === "throw" ? Promise.reject(new Error("Offline")) : false) };
   if (mode === "cancel") window.prompt.mockReturnValue(null);
-  await render(<SessionResult originalSession={session} profile={profile} favouriteStore={store} />);
+  await render(<SessionResult session={session} profile={profile} favouriteStore={store} />);
   await click("favourite-button");
   const button = container.querySelector('[data-testid="favourite-button"]');
   expect(button.textContent).toBe("Save");

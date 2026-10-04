@@ -35,7 +35,7 @@ afterEach(async () => {
 });
 
 test("local Save button → History → Delete immediately removes the row without error", async () => {
-  await render(<SessionResult originalSession={entry.session} profile={entry.profile} sessionStore={SavedSessions} />);
+  await render(<SessionResult session={entry.session} profile={entry.profile} sessionStore={SavedSessions} />);
   await click("save-session-button");
   const [saved] = SavedSessions.list();
   expect(saved.name).toBe("Morning");
@@ -57,7 +57,7 @@ test.each([
   const cloud = { upsert: jest.fn().mockResolvedValue(entry), list: jest.fn().mockResolvedValue([entry]), remove: jest.fn().mockResolvedValue(true) };
   const store = selectSessionStore(access, SavedSessions, cloud);
   expect(store).toBe(usesCloud ? cloud : SavedSessions);
-  await render(<SessionResult originalSession={entry.session} profile={entry.profile} sessionStore={store} />);
+  await render(<SessionResult session={entry.session} profile={entry.profile} sessionStore={store} />);
   await click("save-session-button");
   await render(<SessionHistory sessionStore={store} />);
   expect(container.textContent).toContain("Morning");

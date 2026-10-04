@@ -2,6 +2,12 @@ import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { jsPDF } from "jspdf";
 import SessionResult from "./SessionResult";
+import { useSessionDraft } from "@/hooks/useSessionDraft";
+
+function DraftOwner({ originalSession, profile, ...props }) {
+  const { draft, update, reset } = useSessionDraft(originalSession, profile);
+  return <SessionResult session={draft.workingDraft} profile={draft.profile} onSessionChange={update} onReset={reset} resetKey={draft.originalDraft} {...props} />;
+}
 
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }));
 jest.mock("jspdf", () => ({ jsPDF: jest.fn() }));
@@ -19,7 +25,7 @@ const fixture = (unit = "m") => ({
 });
 const profile = unit => ({ age: 16, level: "competitive", stroke: "freestyle", goal: "technique", intensity: "recovery", poolType: unit === "yd" ? "50y" : "25m", unit, distance: 1000 });
 let container, root, pdf;
-const render = async (session, unit = "m", props = {}) => { await act(async () => root.render(<SessionResult originalSession={session} profile={profile(unit)} {...props} />)); };
+const render = async (session, unit = "m", props = {}) => { await act(async () => root.render(<DraftOwner originalSession={session} profile={profile(unit)} {...props} />)); };
 const click = async id => { await act(async () => container.querySelector(`[data-testid="${id}"]`).click()); };
 const change = async (id, value) => {
   const input = container.querySelector(`[data-testid="${id}"]`);
