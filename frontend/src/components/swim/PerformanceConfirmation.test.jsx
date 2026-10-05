@@ -45,3 +45,53 @@ test("selected empty equipment cannot silently become None; generic skill warns 
   await valid(); await change("equipment", "selected"); await click("start"); expect(onStart).not.toHaveBeenCalled(); expect(container.textContent).toContain("Select the equipment used");
   await change("equipment", "unknown"); await change("task", "skill"); await change("stroke", "choice"); await click("start"); expect(onStart).toHaveBeenCalledTimes(1); expect(container.textContent).toContain("cannot establish Exact comparability");
 });
+
+const exactProtocol = async () => {
+  for (const [key, value] of Object.entries({ unit: "m", pool: "25", structure: "uniform", task: "swim", stroke: "freestyle", count: "8", distance: "100", startType: "push", recovery: "send_off", recoveryTime: "90", equipment: "none", effort: "controlled", target: "none" })) await change(key, value);
+  await click("confirmed");
+};
+
+test("hotfix: missing confirmation athlete has actionable feedback beside Start, even with the exact valid protocol", async () => {
+  await exactProtocol();
+  expect(query("start").disabled).toBe(true);
+  expect(query("start-reason").textContent).toBe("Select an athlete above in this confirmation to start recording.");
+  expect(query("start").getAttribute("aria-describedby")).toBe("performance-start-reason");
+  await change("athleteId", "a"); expect(query("start").disabled).toBe(false); expect(query("start-reason").textContent).toBe("");
+});
+
+test("hotfix: a removed roster ID is not startable and a valid replacement clears the block", async () => {
+  await valid(); await render([{ id: "b", name: "A" }]);
+  expect(query("start").disabled).toBe(true); expect(query("start-reason").textContent).toContain("no longer in the current roster");
+  await click("start"); expect(onStart).not.toHaveBeenCalled();
+  await change("athleteId", "b"); await click("start"); expect(onStart.mock.calls[0][0].athleteId).toBe("b");
+});
+
+test.each(["90", "1:30"])("hotfix: exact 8x100 protocol converts recovery %s using real P1 normalization", async value => {
+  const id = "00000000-0000-4000-8000-000000000001";
+  await render([{ id, name: "Cloud athlete" }]); await exactProtocol(); await change("athleteId", id); await change("recoveryTime", value);
+  expect(query("start").matches(":disabled")).toBe(false); await click("start");
+  expect(onStart.mock.calls[0][0].plannedDefinition).toEqual({ schemaVersion: 1, unit: "m", poolLength: 25, segment: { task: "swim", stroke: "freestyle", repeatCount: 8, repeatDistance: 100, startType: "push", recovery: { mode: "send_off", seconds: 90 }, equipment: [], effort: "controlled", target: { state: "none" } } });
+});
+
+test("hotfix: recovery words produce a linked recovery-time error; correcting input succeeds", async () => {
+  await exactProtocol(); await change("athleteId", "a"); await change("recoveryTime", "90 seconds"); await click("start");
+  expect(onStart).not.toHaveBeenCalled(); expect(query("recoveryTime").getAttribute("aria-invalid")).toBe("true");
+  expect(document.getElementById(query("recoveryTime").getAttribute("aria-describedby")).textContent).toContain("Enter recovery time as 90 or 1:30, without words");
+  await change("recoveryTime", "90"); await click("start"); expect(onStart).toHaveBeenCalledTimes(1); expect(query("recoveryTime").getAttribute("aria-invalid")).toBe("false");
+});
+
+test("hotfix: checkbox survives ordinary edits, while explicit unmount/reopen resets confirmation", async () => {
+  await exactProtocol(); await change("athleteId", "a"); await change("distance", "200"); await change("recoveryTime", "1:30"); await change("effort", "easy");
+  expect(query("confirmed").checked).toBe(true); expect(query("start").disabled).toBe(false);
+  await act(async () => root.render(null)); await render();
+  expect(query("confirmed").checked).toBe(false); expect(query("athleteId").value).toBe(""); expect(query("count").value).toBe("");
+});
+
+test("hotfix: all blocking states are explained beside Start, with access/storage separate from invalid input", async () => {
+  await render([]); expect(query("start-reason").textContent).toContain("No roster athletes");
+  await render(); await change("athleteId", "a"); expect(query("start-reason").textContent).toContain("Check the confirmation box");
+  await change("structure", "unsupported"); expect(query("start-reason").textContent).toContain("supported conditions");
+  await render(undefined, { ...state, checkingAccess: true });
+  expect(query("start").textContent).toBe("Checking access…"); expect(query("start-reason").textContent).toContain("Checking Pro access"); expect(query("start").matches(":disabled")).toBe(true);
+  await render(undefined, { ...state, busy: true }); expect(query("start-reason").textContent).toContain("Starting recording"); expect(query("start").matches(":disabled")).toBe(true);
+});

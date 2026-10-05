@@ -30,32 +30,38 @@ function newId() {
 
 // All performance state stays here, never in the session/profile. Repository
 // construction is lazy/no-I/O; IDs are allocated only for an explicit start.
-export function usePerformanceRecorder({ scopeKey, athleteStore, athletes, enabled, repository, idProvider = newId }) {
+export function usePerformanceRecorder({ scopeKey, athleteStore, athletes, enabled, checkingAccess = false, repository, idProvider = newId }) {
   const repo = useRef(null);
   if (!repo.current) repo.current = repository || createLocalPerformanceStore();
   const [state, setState] = useState(empty);
   const current = useRef(state), pendingStart = useRef(null), flight = useRef(false), epoch = useRef(0);
   const access = useRef(null);
-  access.current = { scopeKey, athleteStore, athletes, enabled };
+  access.current = { scopeKey, athleteStore, athletes, enabled, checkingAccess };
   const boundScope = useRef(scopeKey), boundEnabled = useRef(enabled);
   const publish = patch => { current.current = { ...current.current, ...patch }; setState(current.current); };
   useEffect(() => {
-    if (boundScope.current === scopeKey && boundEnabled.current === enabled) return;
+    // A same-account check suspends commands, not the current lifecycle. A
+    // different scope is always isolated, even while its access is loading.
+    if (boundScope.current === scopeKey && (checkingAccess || boundEnabled.current === enabled)) return;
     boundScope.current = scopeKey; boundEnabled.current = enabled; epoch.current += 1;
     pendingStart.current = null; current.current = empty(); setState(current.current);
-  }, [scopeKey, enabled]);
+  }, [scopeKey, enabled, checkingAccess]);
   useEffect(() => () => { epoch.current += 1; }, []);
-  const permitted = () => access.current.enabled && boundScope.current === access.current.scopeKey && boundEnabled.current === access.current.enabled;
+  const visible = () => boundScope.current === access.current.scopeKey && boundEnabled.current
+    && (access.current.enabled || access.current.checkingAccess);
+  const permitted = () => visible() && access.current.enabled && !access.current.checkingAccess;
   async function run(work) {
     if (flight.current || !permitted()) return false;
     const token = epoch.current, scope = access.current.scopeKey;
     flight.current = true; publish({ busy: true, error: null, issue: "" });
     try {
       const patch = await work();
-      if (token !== epoch.current || scope !== access.current.scopeKey || !access.current.enabled) return false;
+      // An already-started transaction may settle during a same-account check.
+      // Keep its authoritative version/result; never apply it across a boundary.
+      if (token !== epoch.current || scope !== access.current.scopeKey || !visible()) return false;
       publish(patch); return true;
     } catch (e) {
-      if (token === epoch.current && scope === access.current.scopeKey && access.current.enabled) publish({ error: { code: e.code || "storage_failure", message: RECORDING_ERROR_MESSAGES[e.code] || RECORDING_ERROR_MESSAGES.storage_failure } });
+      if (token === epoch.current && scope === access.current.scopeKey && visible()) publish({ error: { code: e.code || "storage_failure", message: RECORDING_ERROR_MESSAGES[e.code] || RECORDING_ERROR_MESSAGES.storage_failure } });
       return false;
     } finally {
       flight.current = false;
@@ -80,7 +86,7 @@ export function usePerformanceRecorder({ scopeKey, athleteStore, athletes, enabl
     return { status: p.status, interrupted: p.interrupted, materiallyModified: p.materiallyModified, reps: p.reps, coachNote: p.coachNote, ...overrides };
   }
   return {
-    state: permitted() ? state : empty(),
+    state: { ...(visible() ? state : empty()), checkingAccess },
     open(source, context = {}) {
       if (!permitted() || flight.current || current.current.recording?.performance.status === "draft") return;
       pendingStart.current = null;
@@ -113,7 +119,7 @@ export function usePerformanceRecorder({ scopeKey, athleteStore, athletes, enabl
       return checkpoint(progressFor(pair, { status: "draft", reps }), { index: correction ? nextRep(updated) : index + 1 });
     },
     previous() {
-      if (!flight.current) publish({ index: Math.max(0, current.current.index - 1), issue: "" });
+      if (permitted() && !flight.current) publish({ index: Math.max(0, current.current.index - 1), issue: "" });
     },
     setConditions(flags) {
       if (flight.current || !current.current.recording) return Promise.resolve(false);
@@ -130,11 +136,11 @@ export function usePerformanceRecorder({ scopeKey, athleteStore, athletes, enabl
       return checkpoint(progressFor(pair, { status: "stopped", reps }), { phase: "summary", closeRequested: false });
     },
     requestClose() {
-      if (flight.current) return;
+      if (!permitted() || flight.current) return;
       if (current.current.phase === "record") publish({ closeRequested: true });
       else publish({ phase: "closed", closeRequested: false, error: null });
     },
-    cancelClose() { if (!flight.current) publish({ closeRequested: false }); },
+    cancelClose() { if (permitted() && !flight.current) publish({ closeRequested: false }); },
     closeDraft() {
       if (flight.current || !current.current.recording) return Promise.resolve(false);
       return checkpoint(progressFor(current.current.recording, { status: "draft" }), { phase: "closed", closeRequested: false });

@@ -133,7 +133,7 @@ export default function SwimPlanner() {
   rosterScopeRef.current = performanceScope;
   const performanceAthletes = athleteRosterScope === performanceScope ? athletes.filter(a => /^[A-Za-z0-9_-]{1,128}$/.test(String(a.id || ""))) : [];
   const recorder = usePerformanceRecorder({ scopeKey: performanceScope, athleteStore: access.isPro && access.user ? "supabase" : "local",
-    athletes: performanceAthletes, enabled: access.isPro && !access.loading });
+    athletes: performanceAthletes, enabled: access.isPro, checkingAccess: access.loading });
   const performanceOpen = recorder.state.phase !== "closed";
   const performanceReturnFocus = useRef(null);
   const openRecorder = block => {
@@ -309,14 +309,18 @@ team: athletes.find(
           }}>
           <DialogTitle className="pr-12">{recorder.state.phase === "confirm" ? "Confirm Performance Segment" : recorder.state.phase === "summary" ? "Saved performance" : "Poolside Recorder"}</DialogTitle>
           <DialogDescription>Record one athlete’s confirmed segment. Stored on this device.</DialogDescription>
+          {recorder.state.checkingAccess && <p role="status">Checking Pro access… Your recording and entries are preserved.</p>}
+          <fieldset disabled={recorder.state.checkingAccess} className="min-w-0" aria-busy={recorder.state.checkingAccess}>
           {recorder.state.phase === "confirm" && <PerformanceConfirmation athletes={performanceAthletes} state={recorder.state} onStart={recorder.start} />}
           {recorder.state.phase === "record" && <PerformanceRecorder key={recorder.state.viewKey} controller={recorder} />}
           {recorder.state.phase === "summary" && <PerformanceSummary recording={recorder.state.recording} athleteLabel={recorder.state.athleteLabel} onClose={recorder.requestClose} />}
+          </fieldset>
         </DialogContent>
       </Dialog>
       {recorder.state.recording && !performanceOpen && <div className="max-w-2xl mx-auto px-4 py-3 border" data-testid="performance-resume-panel">
         <p>{recorder.state.athleteLabel} · {recorder.state.recording.occurrence.plannedDefinition.segment.repeatCount} × {recorder.state.recording.occurrence.plannedDefinition.segment.repeatDistance}{recorder.state.recording.occurrence.plannedDefinition.unit} · Stored on this device</p>
-        <button data-testid="performance-resume" disabled={recorder.state.busy} className="min-h-12 font-bold underline" onClick={e => { performanceReturnFocus.current = e.currentTarget; recorder.resume(); }}>{recorder.state.recording.performance.status === "draft" ? "Resume recording" : "View saved summary"}</button>
+        <button data-testid="performance-resume" disabled={recorder.state.busy || recorder.state.checkingAccess} className="min-h-12 font-bold underline" onClick={e => { performanceReturnFocus.current = e.currentTarget; recorder.resume(); }}>{recorder.state.recording.performance.status === "draft" ? "Resume recording" : "View saved summary"}</button>
+        {recorder.state.checkingAccess && <p role="status">Checking Pro access… Your recording is preserved.</p>}
         {recorder.state.error && <p role="alert">{recorder.state.error.message}</p>}
       </div>}
       <AlertDialog open={Boolean(replacementRequest)} onOpenChange={(open) => { if (!open) setReplacementRequest(null); }}>

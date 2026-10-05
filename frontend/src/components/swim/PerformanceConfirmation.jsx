@@ -5,6 +5,21 @@ import { parsePerformanceTime } from "@/lib/performanceTime";
 const equipmentOptions = ["fins", "paddles", "pull_buoy", "kickboard", "snorkel", "ankle_band"];
 const control = "block w-full min-h-12 border rounded p-2 bg-white";
 const readable = value => value.replaceAll("_", " ");
+// Presentation of P1 errors only; P1 remains the source of validation rules.
+const validationMessages = {
+  unit: ["unit", "Select Metres or Yards."],
+  poolLength: ["pool", "Select a 25 or 50 pool length."],
+  "segment.task": ["task", "Select the task for this segment."],
+  "segment.stroke": ["stroke", "Select the stroke for this segment."],
+  "segment.repeatCount": ["count", "Enter a positive whole number of repetitions."],
+  "segment.repeatDistance": ["distance", "Enter a positive whole, wall-compatible distance per repetition for this pool."],
+  "segment.startType": ["startType", "Select a supported start type or Unknown."],
+  "segment.recovery": ["recovery", "Select Unknown, None, Rest or Send-off for recovery."],
+  "segment.recovery.seconds": ["recoveryTime", "Enter recovery time as 90 or 1:30, without words such as ‘seconds’."],
+  "segment.equipment": ["equipment", "Select supported equipment, None or Unknown."],
+  "segment.effort": ["effort", "Select a supported effort or Unknown."],
+  "segment.target": ["target", "Enter valid target times; minimum must not exceed maximum."],
+};
 function localDate() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -19,19 +34,32 @@ export default function PerformanceConfirmation({ athletes, state, onStart }) {
     equipment: "unknown", selectedEquipment: [], effort: "", target: "unknown", min: "", max: "", structure: "uniform", confirmed: false }));
   const [timezone] = useState(() => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
   const [issue, setIssue] = useState("");
-  const update = (key, value) => setForm(f => ({ ...f, [key]: value }));
+  const [fieldErrors, setFieldErrors] = useState({});
+  const update = (key, value) => {
+    setForm(f => ({ ...f, [key]: value })); setIssue("");
+    setFieldErrors(errors => ({ ...errors, [key]: undefined, ...(key === "recovery" ? { recoveryTime: undefined } : {}) }));
+  };
+  const errorText = key => fieldErrors[key] && <span id={`performance-${key}-error`} className="block text-sm" role="alert">{fieldErrors[key]}</span>;
   const select = (key, label, values) => <label className="block text-sm font-medium">{label}
-    <select className={control} data-testid={`performance-${key}`} value={form[key]} onChange={e => update(key, e.target.value)}>
+    <select className={control} data-testid={`performance-${key}`} value={form[key]} aria-invalid={!!fieldErrors[key]} aria-describedby={fieldErrors[key] ? `performance-${key}-error` : undefined} onChange={e => update(key, e.target.value)}>
       {values.map(([value, text]) => <option key={value} value={value}>{text}</option>)}
-    </select></label>;
+    </select>{errorText(key)}</label>;
   const input = (key, label, type = "text") => <label className="block text-sm font-medium">{label}
-    <input className={control} data-testid={`performance-${key}`} type={type} value={form[key]} onChange={e => update(key, e.target.value)} /></label>;
+    <input className={control} data-testid={`performance-${key}`} type={type} value={form[key]} aria-invalid={!!fieldErrors[key]} aria-describedby={fieldErrors[key] ? `performance-${key}-error` : undefined} onChange={e => update(key, e.target.value)} />{errorText(key)}</label>;
   const options = values => values.map(v => [v, readable(v)]);
   const unsupported = form.structure !== "uniform" || [form.equipment, form.recovery, form.target, form.startType, form.effort].includes("unsupported");
+  const currentAthlete = athletes.some(a => String(a.id) === form.athleteId);
+  const blockingReason = state.checkingAccess ? "Checking Pro access… Your entries are preserved."
+    : state.busy ? "Starting recording… Please wait."
+    : !athletes.length ? "No roster athletes are available. Add an athlete in Athletes before recording."
+    : !currentAthlete ? (form.athleteId ? "The selected athlete is no longer in the current roster. Select an athlete above in this confirmation."
+      : "Select an athlete above in this confirmation to start recording.")
+    : unsupported ? "Choose one uniform segment with supported conditions above."
+    : !form.confirmed ? "Check the confirmation box above to start recording." : "";
   async function submit(e) {
-    e.preventDefault(); setIssue("");
-    if (unsupported) return setIssue("This pilot supports one uniform segment with supported conditions. Mixed rounds or other conditions cannot be recorded as this definition.");
-    if (!form.confirmed || !athletes.some(a => String(a.id) === form.athleteId)) return setIssue("Select a roster athlete and confirm the actual uniform segment.");
+    e.preventDefault();
+    if (blockingReason) return;
+    setIssue(""); setFieldErrors({});
     if (form.equipment === "selected" && !form.selectedEquipment.length) return setIssue("Select the equipment used, or explicitly choose None or Unknown.");
     const seconds = text => { const p = parsePerformanceTime(text); return p.ok ? p.value.hundredths / 100 : NaN; };
     const result = normalizePerformanceDefinition({ schemaVersion: 1, unit: form.unit, poolLength: Number(form.pool), segment: {
@@ -41,7 +69,10 @@ export default function PerformanceConfirmation({ athletes, state, onStart }) {
       equipment: form.equipment === "unknown" ? null : form.equipment === "none" ? [] : form.selectedEquipment,
       target: form.target === "range" ? { state: "range", minSeconds: seconds(form.min), maxSeconds: seconds(form.max) } : { state: form.target },
     } });
-    if (!result.ok) return setIssue("Check the protocol: select task, stroke, unit and pool, enter positive whole repetitions and a wall-compatible distance, and valid recovery/target times.");
+    if (!result.ok) {
+      const errors = Object.fromEntries(result.errors.map(error => validationMessages[error.path] || ["protocol", "Check the repetitions and distance for this uniform segment."]));
+      setFieldErrors(errors); setIssue(Object.values(errors).join(" ")); return;
+    }
     if (result.definition.segment.repeatCount > 10000) return setIssue("This pilot supports up to 10,000 repetitions.");
     await onStart({ athleteId: form.athleteId, plannedDefinition: result.definition, performedDate: form.date, timezone });
   }
@@ -53,7 +84,7 @@ export default function PerformanceConfirmation({ athletes, state, onStart }) {
       <p>Confirm one actual uniform segment below. Workout text is not converted into a protocol.</p>
     </details>
     {!athletes.length && <p role="alert">No usable roster athlete is available. Add an athlete in Athletes before recording.</p>}
-    <fieldset disabled={state.busy} className="space-y-4">
+    <fieldset disabled={state.busy || state.checkingAccess} className="space-y-4">
       {select("athleteId", "Athlete", [["", "Select a roster athlete"], ...athletes.map(a => [String(a.id), `${a.name || "Athlete"} (${a.id})`])])}
       {input("date", "Training date", "date")}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -77,7 +108,8 @@ export default function PerformanceConfirmation({ athletes, state, onStart }) {
       {unsupported && <p role="alert">This pilot supports one uniform segment with supported conditions. These conditions cannot be represented safely.</p>}
       <p className="text-sm">Unknown conditions and generic drill, skill or choice work cannot establish Exact comparability. Some summary metrics will be unavailable.</p>
       <label className="flex items-center gap-3 min-h-12"><input data-testid="performance-confirmed" type="checkbox" checked={form.confirmed} onChange={e => update("confirmed", e.target.checked)} />I confirm this is the actual uniform segment, not a flattened set of rounds.</label>
-      <button data-testid="performance-start" className="w-full min-h-12 bg-[#003366] text-white rounded px-4 disabled:opacity-50" disabled={!athletes.length || unsupported || !form.confirmed || !form.athleteId} type="submit">{state.busy ? "Starting…" : "Start Recording"}</button>
+      <p id="performance-start-reason" data-testid="performance-start-reason" role="status">{blockingReason}</p>
+      <button data-testid="performance-start" aria-describedby={blockingReason ? "performance-start-reason" : undefined} className="w-full min-h-12 bg-[#003366] text-white rounded px-4 disabled:opacity-50" disabled={!!blockingReason} type="submit">{state.checkingAccess ? "Checking access…" : state.busy ? "Starting…" : "Start Recording"}</button>
     </fieldset>
     {(issue || state.issue || state.error) && <p role="alert">{issue || state.issue || state.error.message}</p>}
   </form>;

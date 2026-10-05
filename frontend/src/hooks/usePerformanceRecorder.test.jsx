@@ -122,3 +122,58 @@ test("Stop without attempted work cannot invent outcomes; modified/interrupted f
   await call("setConditions", { interrupted: true }); await call("setConditions", { materiallyModified: true });
   const pair = await read(); expect(pair.performance.interrupted).toBe(true); expect(pair.performance.materiallyModified).toBe(true); expect(pair.performance.recordVersion).toBe(3);
 });
+
+test("hotfix: same-account checking preserves confirmation and suspends commands even if enabled is temporarily false", async () => {
+  props = { ...props, scopeKey: "account:user-a", athleteStore: "supabase" }; await render(); await call("open", source());
+  const before = controller.state.source;
+  props = { ...props, enabled: false, checkingAccess: true }; await render();
+  expect(controller.state.phase).toBe("confirm"); expect(controller.state.source).toEqual(before); expect(controller.state.checkingAccess).toBe(true);
+  expect(await call("start", args())).toBe(false); await call("requestClose"); expect(controller.state.phase).toBe("confirm");
+  props = { ...props, enabled: true, checkingAccess: false }; await render();
+  expect(controller.state.phase).toBe("confirm"); expect(controller.state.source).toEqual(before);
+});
+
+test("hotfix: active record and closed resume pointer survive same-account checking; explicit close remains explicit", async () => {
+  props = { ...props, scopeKey: "account:user-a", athleteStore: "supabase" }; await render(); await start(); await save();
+  const pair = controller.state.recording;
+  props = { ...props, checkingAccess: true }; await render();
+  expect(controller.state.recording).toEqual(pair); expect(controller.state.index).toBe(1);
+  await call("previous"); await call("requestClose"); expect(await save()).toBe(false); expect(await call("discard")).toBe(false);
+  expect(controller.state.index).toBe(1); expect(controller.state.closeRequested).toBe(false);
+  props = { ...props, checkingAccess: false }; await render(); await call("closeDraft");
+  const closed = controller.state.recording;
+  props = { ...props, checkingAccess: true }; await render(); expect(controller.state.phase).toBe("closed"); expect(controller.state.recording).toEqual(closed);
+  expect(await call("resume")).toBe(false);
+  props = { ...props, checkingAccess: false }; await render(); await call("resume"); expect(controller.state.recording).toEqual(closed); expect(controller.state.index).toBe(1);
+});
+
+test.each(["confirm", "record"])("hotfix: account B never receives account A %s state, even during loading", async phase => {
+  props = { ...props, scopeKey: "account:user-a", athleteStore: "supabase" }; await render();
+  await call("open", source()); if (phase === "record") await call("start", args());
+  const pair = controller.state.recording;
+  props = { ...props, scopeKey: "account:user-b", checkingAccess: true }; await render();
+  expect(controller.state.phase).toBe("closed"); expect(controller.state.recording).toBeNull(); expect(controller.state.source).toBeNull();
+  props = { ...props, checkingAccess: false }; await render(); expect(controller.state.phase).toBe("closed");
+  if (pair) expect(await store.getRecording({ scopeKey: "account:user-a", performanceId: pair.performance.id })).toEqual(pair);
+});
+
+test("hotfix: confirmed same-account loss clears UI without deleting persisted checkpoints or resurfacing them on regain", async () => {
+  props = { ...props, scopeKey: "account:user-a", athleteStore: "supabase" }; await render(); await start(); await save();
+  const pair = controller.state.recording;
+  props = { ...props, enabled: false, checkingAccess: true }; await render(); expect(controller.state.recording).toEqual(pair);
+  props = { ...props, checkingAccess: false }; await render(); expect(controller.state.phase).toBe("closed"); expect(controller.state.recording).toBeNull();
+  expect(await store.getRecording({ scopeKey: "account:user-a", performanceId: pair.performance.id })).toEqual(pair);
+  props = { ...props, enabled: true }; await render(); expect(controller.state.recording).toBeNull();
+});
+
+test.each(["start", "save"])("hotfix: an in-flight %s settling during access checking retains its authoritative result/version", async action => {
+  props = { ...props, scopeKey: "account:user-a", athleteStore: "supabase" }; await render(); await call("open", source());
+  if (action === "save") await call("start", args());
+  const method = action === "start" ? "startRecording" : "saveProgress", original = store[method]; let release;
+  jest.spyOn(store, method).mockImplementation(input => new Promise(resolve => { release = () => original(input).then(resolve); }));
+  let pending; await act(async () => { pending = action === "start" ? controller.start(args()) : controller.saveRep("completed"); });
+  props = { ...props, checkingAccess: true, enabled: false }; await render();
+  await act(async () => { await release(); await pending; });
+  expect(controller.state.phase).toBe("record"); expect(controller.state.recording.performance.recordVersion).toBe(action === "save" ? 2 : 1);
+  props = { ...props, checkingAccess: false, enabled: true }; await render(); expect(controller.state.recording).toEqual(await read());
+});

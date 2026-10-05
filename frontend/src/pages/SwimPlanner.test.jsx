@@ -271,3 +271,58 @@ test("Free entry is hidden; account roster selection is explicit and cannot reus
   await act(async () => resolveRoster([{ id: "cloud-a", name: "Cloud athlete" }]));
   expect([...query("performance-athleteId").options].map(o => o.value)).toEqual(["", "cloud-a"]);
 });
+
+const cloudAthleteId = "00000000-0000-4000-8000-000000000001";
+const setPilotAccess = async (overrides = {}) => {
+  useCoachAccess.mockReturnValue({ isPro: true, user: { id: "pilot-account-a" }, configured: false, loading: false, ...overrides });
+  await act(async () => root.render(<SwimPlanner />));
+};
+const openCloudConfirmation = async () => {
+  jest.spyOn(CloudAthletes, "list").mockResolvedValue([{ id: cloudAthleteId, name: "Pilot Cloud Athlete" }]);
+  await setPilotAccess(); await generate(); await click("record-results");
+  for (const [key, value] of Object.entries({ athleteId: cloudAthleteId, unit: "m", pool: "25", structure: "uniform", task: "swim", stroke: "freestyle", count: "8", distance: "100", startType: "push", recovery: "send_off", recoveryTime: "90", equipment: "none", effort: "controlled", target: "none" })) await change(`performance-${key}`, value);
+  await click("performance-confirmed");
+};
+
+test("hotfix: exact Pro UUID 8x100 confirmation survives same-account checking and persists the normalized account protocol", async () => {
+  await openCloudConfirmation(); const form = query("performance-start").closest("form");
+  expect(query("performance-start").matches(":disabled")).toBe(false);
+  await setPilotAccess({ loading: true });
+  expect(query("performance-start").closest("form")).toBe(form); expect(query("performance-start").matches(":disabled")).toBe(true);
+  expect(query("performance-start-reason").textContent).toContain("Checking Pro access");
+  expect(query("performance-athleteId").value).toBe(cloudAthleteId); expect(query("performance-confirmed").checked).toBe(true);
+  expect(query("performance-recoveryTime").value).toBe("90"); expect(query("performance-count").value).toBe("8");
+  await click("performance-start"); expect(performanceStore.startRecording).not.toHaveBeenCalled();
+  await setPilotAccess(); expect(query("performance-start").matches(":disabled")).toBe(false);
+  jest.useRealTimers(); const cryptoBefore = globalThis.crypto;
+  Object.defineProperty(globalThis, "crypto", { configurable: true, value: require("crypto").webcrypto });
+  try {
+    await click("performance-start"); await flushPerformance("startRecording");
+    const input = performanceStore.startRecording.mock.calls[0][0];
+    expect(input.scopeKey).toBe("account:pilot-account-a"); expect(input.athleteRef).toEqual({ store: "supabase", id: cloudAthleteId });
+    expect(input.plannedDefinition).toEqual({ schemaVersion: 1, unit: "m", poolLength: 25, segment: { task: "swim", stroke: "freestyle", repeatCount: 8, repeatDistance: 100, startType: "push", recovery: { mode: "send_off", seconds: 90 }, equipment: [], effort: "controlled", target: { state: "none" } } });
+    await change("performance-time", "67.2"); await click("performance-save"); await flushPerformance("saveProgress");
+    await change("performance-time", "66.8"); const recorderElement = query("performance-recorder");
+    await setPilotAccess({ loading: true });
+    expect(query("performance-recorder")).toBe(recorderElement); expect(query("performance-time").value).toBe("66.8");
+    expect(query("performance-save").matches(":disabled")).toBe(true); expect(document.querySelector('[role="dialog"]').textContent).toContain("Checking Pro access");
+    await click("performance-save"); expect(performanceStore.saveProgress).toHaveBeenCalledTimes(1);
+    await setPilotAccess(); expect(query("performance-time").value).toBe("66.8"); expect(query("performance-recorder").textContent).toContain("Rep 2 of 8");
+    await click("performance-save"); await flushPerformance("saveProgress"); expect(query("performance-recorder").textContent).toContain("Rep 3 of 8");
+    const pair = await performanceStore.getRecording({ scopeKey: input.scopeKey, performanceId: input.performanceId });
+    expect(pair.performance.recordVersion).toBe(3); expect(pair.performance.reps.slice(0, 2).map(r => r.time.hundredths)).toEqual([6720, 6680]);
+    await setPilotAccess({ isPro: false }); expect(query("performance-recorder")).toBeNull(); expect(query("performance-resume")).toBeNull();
+    expect(await performanceStore.getRecording({ scopeKey: input.scopeKey, performanceId: input.performanceId })).toEqual(pair);
+  } finally { Object.defineProperty(globalThis, "crypto", { configurable: true, value: cryptoBefore }); }
+});
+
+test("hotfix: account switch isolates filled confirmation; explicit close/reopen still resets pre-start fields", async () => {
+  await openCloudConfirmation();
+  await setPilotAccess({ user: { id: "pilot-account-b" }, loading: true });
+  expect(query("performance-athleteId")).toBeNull(); expect(document.querySelector('[role="dialog"]')).toBeNull();
+  await setPilotAccess({ user: { id: "pilot-account-b" } }); await click("record-results");
+  expect(query("performance-athleteId").value).toBe(""); expect(query("performance-count").value).toBe(""); expect(query("performance-confirmed").checked).toBe(false);
+  await change("performance-athleteId", cloudAthleteId); await change("performance-count", "8"); await click("performance-confirmed");
+  await act(async () => [...document.querySelector('[role="dialog"]').querySelectorAll("button")].find(b => b.textContent === "Close").click());
+  await click("record-results"); expect(query("performance-athleteId").value).toBe(""); expect(query("performance-count").value).toBe(""); expect(query("performance-confirmed").checked).toBe(false);
+});
