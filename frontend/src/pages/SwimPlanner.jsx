@@ -329,7 +329,7 @@ team: athletes.find(
           <fieldset disabled={recorder.state.checkingAccess} className="min-w-0" aria-busy={recorder.state.checkingAccess}>
           {recorder.state.phase === "confirm" && <PerformanceConfirmation athletes={performanceAthletes} state={recorder.state} onStart={recorder.start} onFindPreviousExact={recorder.findPreviousExact} />}
           {recorder.state.phase === "record" && <PerformanceRecorder key={recorder.state.viewKey} controller={recorder} />}
-          {recorder.state.phase === "summary" && <PerformanceSummary recording={recorder.state.recording} athleteLabel={recorder.state.athleteLabel} onClose={recorder.requestClose} />}
+          {recorder.state.phase === "summary" && <PerformanceSummary recording={recorder.state.recording} athleteLabel={recorder.state.athleteLabel} onClose={recorder.requestClose} onCompare={recorder.compareSavedPerformance} comparisonEnabled={recorder.state.historyEnabled && !recorder.state.busy} comparisonVersion={recorder.state.historyVersion} />}
           </fieldset>
         </DialogContent>
       </Dialog>

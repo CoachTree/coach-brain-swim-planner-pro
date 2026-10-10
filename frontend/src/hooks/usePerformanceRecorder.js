@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createLocalPerformanceStore } from "@/lib/localPerformanceStore";
 import { normalizePerformance } from "@/lib/performanceResults";
 import { comparePerformanceDefinitions, normalizePerformanceDefinition } from "@/lib/performanceDefinition";
+import { calculatePerformanceMetrics } from "@/lib/performanceMetrics";
 import { composePerformance } from "@/lib/performanceRecording";
 
 export const RECORDING_ERROR_MESSAGES = Object.freeze({
@@ -109,6 +110,42 @@ export function usePerformanceRecorder({ scopeKey, athleteStore, athletes, enabl
       } catch (error) {
         if (valid()) throw error;
         return null;
+      }
+    },
+    async compareSavedPerformance() {
+      const pair = current.current.recording;
+      if (!permitted() || flight.current || current.current.phase !== "summary" || !pair) return null;
+      const { occurrence, performance } = pair;
+      const member = () => access.current.scopeKey === occurrence.scopeKey && access.current.athleteStore === performance.athleteRef.store
+        && access.current.athletes.filter(a => String(a.id) === performance.athleteRef.id).length === 1;
+      if (!member()) return { status: "unavailable" };
+      if (!calculatePerformanceMetrics(composePerformance(occurrence, performance)).metrics?.trendEligible) return { status: "ineligible" };
+      const token = historyEpoch.current, request = ++historyRequest.current;
+      const valid = () => token === historyEpoch.current && request === historyRequest.current && permitted() && member()
+        && current.current.phase === "summary" && current.current.recording === pair;
+      try {
+        const latest = await repo.current.getRecording({ scopeKey: occurrence.scopeKey, performanceId: performance.id });
+        if (!valid()) return null;
+        if (latest.occurrence.recordVersion !== occurrence.recordVersion || latest.performance.recordVersion !== performance.recordVersion) return { status: "changed" };
+        const result = await repo.current.findLatestExact({ scopeKey: occurrence.scopeKey, athleteRef: performance.athleteRef,
+          plannedDefinition: occurrence.plannedDefinition, excludeOccurrenceId: occurrence.id, beforePerformedDate: occurrence.performedDate });
+        if (!valid()) return null;
+        const previous = result.recording;
+        if (previous) {
+          const o = previous.occurrence, p = previous.performance;
+          if (o.id === occurrence.id || p.id === performance.id || o.scopeKey !== occurrence.scopeKey || p.scopeKey !== performance.scopeKey
+            || p.athleteRef.store !== performance.athleteRef.store || p.athleteRef.id !== performance.athleteRef.id
+            || o.performedDate >= occurrence.performedDate
+            || !calculatePerformanceMetrics(composePerformance(o, p)).metrics?.trendEligible
+            || comparePerformanceDefinitions(occurrence.plannedDefinition, o.plannedDefinition).classification !== "EXACT") {
+            throw new Error("Historical comparison could not be verified");
+          }
+        }
+        return { status: "ready", ...result };
+      } catch (error) {
+        if (!valid()) return null;
+        if (error.code === "not_found") return { status: "changed" };
+        throw error;
       }
     },
     open(source, context = {}) {

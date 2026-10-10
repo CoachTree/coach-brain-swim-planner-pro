@@ -315,3 +315,14 @@ test("same IDs and changed athlete or definition cannot be retried as same creat
   const changedDefinition = input(); changedDefinition.plannedDefinition.segment.equipment = ["fins"];
   await fail(store.startRecording(changedDefinition), "conflict");
 });
+
+test("strict date cutoff skips future and same-day candidates while preserving no-cutoff ordering", async () => {
+  await complete("older", x => ({ ...x, performedDate: "2026-10-01" }));
+  await complete("same"); await complete("future", x => ({ ...x, performedDate: "2026-10-05" }));
+  expect((await store.findLatestExact(query())).recording.performance.id).toBe("perf-future");
+  expect((await store.findLatestExact({ ...query(), beforePerformedDate: "2026-10-04", excludeOccurrenceId: "occ-same" })).recording.performance.id).toBe("perf-older");
+  expect((await store.findLatestExact({ ...query(), beforePerformedDate: "2026-10-01" })).recording).toBeNull();
+});
+test.each(["2026-02-30", "2026-13-01", "0000-01-01", "2026-1-01", "bad", 20261001])("invalid cutoff %s is rejected", async beforePerformedDate => {
+  await fail(store.findLatestExact({ ...query(), beforePerformedDate }), "invalid_data");
+});

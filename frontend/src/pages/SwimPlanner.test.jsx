@@ -224,12 +224,21 @@ test("builder → recording → finish stays private in Save/Favourite/Copy/PDF/
     expect(query("performance-athleteId").value).toBe("a"); expect(query("performance-pool").value).toBe("25");
     expect(document.querySelector('[role="dialog"]')).not.toBeNull(); expect(document.body.style.pointerEvents).toBe("none");
     await click("generate-another-button"); expect(generateSession).toHaveBeenCalledTimes(1);
+    for (const [key, value] of Object.entries({ startType: "push", recovery: "none", equipment: "none", effort: "controlled", target: "none" })) await change(`performance-${key}`, value);
+    const history = jest.spyOn(performanceStore, "findLatestExact");
     await confirmPerformance(); expect(query("performance-recorder")).not.toBeNull();
     const start = performanceStore.startRecording.mock.calls[0][0];
     expect(start.athleteRef).toEqual({ store: "local", id: "b" }); expect(start.scopeKey).toBe("device:browser-local");
     expect(start.source).toEqual({ sessionId: "generated-1", blockId: "main_set", draftRevision: 0, changeSequence: 0 });
+    const prior = await performanceStore.startRecording({ ...start, occurrenceId: "previous-occ", performanceId: "previous-perf", segmentId: "previous-seg", performedDate: "2020-01-01" });
+    await performanceStore.saveProgress({ scopeKey: start.scopeKey, performanceId: prior.performance.id, expectedVersion: 1,
+      progress: { status: "completed", interrupted: false, materiallyModified: false, reps: [{ repIndex: 0, plannedRepIndex: 0, roundIndex: 0, outcome: "completed", time: { hundredths: 6543, precision: 2 } }] } });
     await change("performance-time", "67.23"); await click("performance-save"); await flushPerformance("saveProgress");
     await act(async () => [...document.querySelectorAll("button")].find(b => b.textContent === "Finish").click()); await flushPerformance("saveProgress");
+    for (let i = 0; i < 50 && !query("performance-comparison-result"); i++) await act(async () => new Promise(resolve => setTimeout(resolve, 5)));
+    expect(query("performance-comparison-result").textContent).toContain("Previous Exact · 2020-01-01");
+    expect(query("performance-comparison-result").textContent).toContain("+1.80 s — more time");
+    expect(history).toHaveBeenCalledWith(expect.objectContaining({ excludeOccurrenceId: start.occurrenceId, beforePerformedDate: start.performedDate }));
     expect(query("performance-summary").textContent).toContain("Completed 1/1");
     await act(async () => [...document.querySelectorAll("button")].find(b => b.textContent === "Close summary").click());
     await click("save-session-button"); await click("favourite-button"); await click("copy-button");
@@ -238,7 +247,7 @@ test("builder → recording → finish stays private in Save/Favourite/Copy/PDF/
     const payload = decodeShare(new URLSearchParams(navigator.clipboard.writeText.mock.calls.at(-1)[0].split("?")[1]).get("data"));
     const saved = SavedSessions.list()[0]; expect(saved.profile.athleteId).toBe("a"); expect(payload.session).toEqual(saved.session); expect(Favourites.list()[0].session).toEqual(saved.session);
     for (const data of [saved, payload, copy, pdf.text.mock.calls, window.gtag.mock.calls, Object.values(localStorage)]) {
-      const serialized = JSON.stringify(data); expect(serialized).not.toContain(start.performanceId); expect(serialized).not.toContain("67.23"); expect(serialized).not.toContain("plannedDefinition");
+      const serialized = JSON.stringify(data); expect(serialized).not.toContain(start.performanceId); expect(serialized).not.toContain("67.23"); expect(serialized).not.toContain("plannedDefinition"); expect(serialized).not.toContain("previous-perf"); expect(serialized).not.toContain("65.43");
     }
     expect(window.gtag).toHaveBeenCalledTimes(1);
     const persisted = await performanceStore.getRecording({ scopeKey: start.scopeKey, performanceId: start.performanceId }); expect(persisted.performance.reps[0].time.hundredths).toBe(6723);

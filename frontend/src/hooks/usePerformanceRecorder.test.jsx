@@ -246,3 +246,55 @@ test("history gates unknown protocols, missing confirmation, and ambiguous athle
   props.athletes = [{ id: "b" }, { id: "b" }]; await render();
   await call("findPreviousExact", historyArgs()); expect(spy).not.toHaveBeenCalled();
 });
+
+const finishOne = async () => { await start(1); await save(); await call("finish"); };
+const earlier = pair => ({ occurrence: { ...pair.occurrence, id: "earlier-occ", performedDate: "2026-10-01" }, performance: { ...pair.performance, id: "earlier-perf", occurrenceId: "earlier-occ" } });
+test("saved comparison uses authoritative identity, strict cutoff and self exclusion without writes", async () => {
+  await finishOne(); const pair = controller.state.recording;
+  const spy = jest.spyOn(store, "findLatestExact").mockResolvedValue({ recording: earlier(pair), warnings: [] });
+  expect((await call("compareSavedPerformance")).status).toBe("ready");
+  expect(spy).toHaveBeenCalledWith({ scopeKey: pair.occurrence.scopeKey, athleteRef: pair.performance.athleteRef, plannedDefinition: pair.occurrence.plannedDefinition,
+    excludeOccurrenceId: pair.occurrence.id, beforePerformedDate: pair.occurrence.performedDate });
+  expect(controller.state.busy).toBe(false); expect(await read()).toEqual(pair);
+});
+test.each(["self", "future", "same-day", "athlete", "scope", "store", "protocol", "untimed"])("saved comparison rejects invalid returned %s", async variant => {
+  await finishOne(); const pair = controller.state.recording; let candidate = earlier(pair);
+  if (variant === "self") candidate = pair;
+  if (variant === "future") candidate.occurrence.performedDate = "2026-10-05";
+  if (variant === "same-day") candidate.occurrence.performedDate = pair.occurrence.performedDate;
+  if (variant === "athlete") candidate.performance.athleteRef = { store: "local", id: "b" };
+  if (variant === "scope") candidate.occurrence.scopeKey = "device:other";
+  if (variant === "store") candidate.performance.athleteRef = { store: "supabase", id: "a" };
+  if (variant === "protocol") candidate.occurrence.plannedDefinition = definition(2);
+  if (variant === "untimed") candidate.performance.reps = [{ ...candidate.performance.reps[0], time: null }];
+  jest.spyOn(store, "findLatestExact").mockResolvedValue({ recording: candidate, warnings: [] });
+  await expect(controller.compareSavedPerformance()).rejects.toThrow(); expect(controller.state.error).toBeNull();
+});
+test.each(["version", "date", "deleted"])("changed current %s prevents lookup", async variant => {
+  await finishOne(); const pair = controller.state.recording;
+  if (variant === "version") await store.saveProgress({ scopeKey: props.scopeKey, performanceId: pair.performance.id, expectedVersion: pair.performance.recordVersion,
+    progress: { status: "completed", interrupted: true, materiallyModified: false, reps: pair.performance.reps } });
+  if (variant === "date") await store.correctPerformedDate({ scopeKey: props.scopeKey, performanceId: pair.performance.id, expectedOccurrenceVersion: pair.occurrence.recordVersion, performedDate: "2026-10-03" });
+  if (variant === "deleted") await store.deleteRecording({ scopeKey: props.scopeKey, performanceId: pair.performance.id, expectedVersion: pair.performance.recordVersion, expectedOccurrenceVersion: pair.occurrence.recordVersion });
+  const spy = jest.spyOn(store, "findLatestExact"); expect((await call("compareSavedPerformance")).status).toBe("changed"); expect(spy).not.toHaveBeenCalled();
+});
+test.each(["close", "resume", "checking", "loss", "account", "deleted", "duplicate"])("pending saved comparison is rejected after %s", async boundary => {
+  await finishOne(); let resolve; jest.spyOn(store, "findLatestExact").mockImplementation(() => new Promise(r => { resolve = r; }));
+  const pending = controller.compareSavedPerformance();
+  while (!resolve) await new Promise(r => setTimeout(r, 1));
+  if (boundary === "close") await call("requestClose");
+  if (boundary === "resume") { await call("requestClose"); await call("resume"); }
+  if (boundary === "checking") { props.checkingAccess = true; await render(); props.checkingAccess = false; await render(); }
+  if (boundary === "loss") { props.enabled = false; await render(); props.enabled = true; await render(); }
+  if (boundary === "account") { props.scopeKey = "account:other"; props.athleteStore = "supabase"; await render(); props.scopeKey = "device:test"; props.athleteStore = "local"; await render(); }
+  if (boundary === "deleted") { props.athletes = [{ id: "b" }]; await render(); }
+  if (boundary === "duplicate") { props.athletes = [{ id: "a" }, { id: "a" }]; await render(); }
+  resolve({ recording: null, warnings: [] }); expect(await pending).toBeNull();
+});
+test.each(["untimed", "modified", "interrupted", "stopped"])("current %s summary cannot initiate comparison", async variant => {
+  await start(2);
+  await call("saveRep", "completed", variant === "untimed" ? null : { hundredths: 6700, precision: 0 });
+  if (variant === "stopped") await call("stop");
+  else { await save(); if (variant !== "untimed") await call("setConditions", variant === "modified" ? { materiallyModified: true } : { interrupted: true }); await call("finish"); }
+  const spy = jest.spyOn(store, "findLatestExact"); expect((await call("compareSavedPerformance")).status).toBe("ineligible"); expect(spy).not.toHaveBeenCalled();
+});

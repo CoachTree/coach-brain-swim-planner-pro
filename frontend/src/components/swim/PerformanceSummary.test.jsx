@@ -19,3 +19,41 @@ test.each([["swim", false], ["drill", true], ["skill", true]])("unavailable %s/t
   await act(async () => root.render(<PerformanceSummary recording={pair(task, timed)} athleteLabel="Athlete" onClose={() => {}} />));
   expect(container.textContent).toContain("Average: —"); expect(container.textContent).toContain("Best: —"); expect(container.textContent).not.toContain("Second-half drift:");
 });
+
+const renderComparison = async (recording, onCompare, extra = {}) => { await act(async () => root.render(<PerformanceSummary recording={recording} athleteLabel="Athlete" onClose={() => {}} onCompare={onCompare} comparisonEnabled comparisonVersion={1} {...extra} />)); };
+test("comparison shows explicit dates, signed neutral deltas and does not repeat on ordinary rerender", async () => {
+  const current = pair(), previous = pair(); previous.occurrence.performedDate = "2026-10-01";
+  previous.performance.reps = previous.performance.reps.map((r, i) => ({ ...r, time: { hundredths: i === 0 ? 6600 : 7000, precision: 1 } }));
+  const lookup = jest.fn().mockResolvedValue({ status: "ready", recording: previous, warnings: [{ code: "invalid_data" }] });
+  await renderComparison(current, lookup);
+  expect(container.textContent).toContain("This performance · 2026-10-04"); expect(container.textContent).toContain("Previous Exact · 2026-10-01");
+  expect(container.textContent).toContain("−0.5 s — less time"); expect(container.textContent).toContain("+1.0 s — more time");
+  expect(container.textContent).toContain("Some stored records");
+  await renderComparison(current, lookup); expect(lookup).toHaveBeenCalledTimes(1);
+});
+test("comparison failure retries without losing current metrics or Close", async () => {
+  const current = pair(); const lookup = jest.fn().mockRejectedValueOnce(new Error()).mockResolvedValue({ status: "ready", recording: null, warnings: [] });
+  await renderComparison(current, lookup); expect(container.textContent).toContain("This performance is saved"); expect(container.textContent).toContain("Average: 1:08.5");
+  await act(async () => [...container.querySelectorAll("button")].find(b => b.textContent === "Retry comparison").click());
+  expect(container.textContent).toContain("No eligible Exact result before 2026-10-04");
+});
+test("ineligible summary preserves metrics without looking up history", async () => {
+  const lookup = jest.fn(); await renderComparison(pair("swim", false), lookup);
+  expect(container.textContent).toContain("Comparison unavailable"); expect(lookup).not.toHaveBeenCalled();
+});
+test("access boundary hides and invalidates pending comparison", async () => {
+  let resolve; const lookup = jest.fn().mockImplementation(() => new Promise(r => { resolve = r; })); const current = pair();
+  await renderComparison(current, lookup); expect(container.textContent).toContain("Looking for an earlier");
+  await renderComparison(current, lookup, { comparisonEnabled: false, comparisonVersion: 2 });
+  await act(async () => resolve({ status: "ready", recording: pair(), warnings: [] }));
+  expect(container.querySelector('[data-testid="performance-comparison-result"]')).toBeNull();
+});
+
+test("mixed precision rounds only display and avoids negative zero", async () => {
+  const current = pair(), previous = pair();
+  current.performance.reps = current.performance.reps.map(r => ({ ...r, time: { hundredths: 6700, precision: 2 } }));
+  previous.performance.reps = previous.performance.reps.map((r, i) => ({ ...r, time: { hundredths: i === 0 ? 6710 : 6700, precision: 1 } }));
+  previous.occurrence.performedDate = "2026-10-01";
+  await renderComparison(current, jest.fn().mockResolvedValue({ status: "ready", recording: previous, warnings: [] }));
+  expect(container.textContent).toContain("0.0 s — no difference at displayed precision"); expect(container.textContent).not.toContain("−0.0");
+});

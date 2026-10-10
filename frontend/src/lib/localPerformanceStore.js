@@ -195,10 +195,15 @@ export function createLocalPerformanceStore(options = {}) {
     // Stream candidates for this exact scope + athlete. Do not load the entire
     // history into memory or trust text/canonical keys instead of P1 comparison.
     async findLatestExact(args) {
-      const { scopeKey, athleteRef, plannedDefinition, excludeOccurrenceId = null } = argumentsFor(args, ["scopeKey","athleteRef","plannedDefinition","excludeOccurrenceId"]);
+      const { scopeKey, athleteRef, plannedDefinition, excludeOccurrenceId = null, beforePerformedDate = null } = argumentsFor(args, ["scopeKey","athleteRef","plannedDefinition","excludeOccurrenceId","beforePerformedDate"]);
       validateRecordingScope(scopeKey);
       const query = normalizeRecordingQuery({ scopeKey, athleteRef, plannedDefinition });
       if (excludeOccurrenceId !== null) id(excludeOccurrenceId);
+      if (beforePerformedDate !== null) {
+        const parsed = typeof beforePerformedDate === "string" && /^(?!0000)\d{4}-\d{2}-\d{2}$/.test(beforePerformedDate)
+          ? new Date(`${beforePerformedDate}T00:00:00.000Z`) : null;
+        if (!parsed || !Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== beforePerformedDate) throw error("invalid_data", "Invalid beforePerformedDate");
+      }
       return run("readonly", tx => new Promise((resolve, reject) => {
         let recording = null;
         const warnings = [];
@@ -211,6 +216,7 @@ export function createLocalPerformanceStore(options = {}) {
             const candidate = await pair(tx, scopeKey, cursor.value.id, cursor.value);
             const { occurrence, performance } = candidate;
             if (occurrence.id !== excludeOccurrenceId
+              && (beforePerformedDate === null || occurrence.performedDate < beforePerformedDate)
               && comparePerformanceDefinitions(query.plannedDefinition, occurrence.plannedDefinition).classification === "EXACT"
               && calculatePerformanceMetrics(composePerformance(occurrence, performance)).metrics?.trendEligible) {
               const newer = !recording || lexical(occurrence.performedDate, recording.occurrence.performedDate)
