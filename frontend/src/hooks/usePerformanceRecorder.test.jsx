@@ -177,3 +177,30 @@ test.each(["start", "save"])("hotfix: an in-flight %s settling during access che
   expect(controller.state.phase).toBe("record"); expect(controller.state.recording.performance.recordVersion).toBe(action === "save" ? 2 : 1);
   props = { ...props, checkingAccess: false, enabled: true }; await render(); expect(controller.state.recording).toEqual(await read());
 });
+
+test.each([
+  ["device:test", "local"], ["account:user-a", "supabase"],
+])("verified %s identity suggests only its stable ID", async (scopeKey, athleteStore) => {
+  props = { ...props, scopeKey, athleteStore }; await render();
+  await call("open", source(), { recordingAthleteRef: { scopeKey, store: athleteStore, id: "b" } });
+  expect(controller.state.context.suggestedAthleteId).toBe("b");
+  props = { ...props, athletes: [{ id: "a", name: "Same name" }] }; await render();
+  expect(await call("start", { ...args(), athleteId: "b" })).toBe(false);
+  expect(controller.state.recording).toBeNull();
+});
+
+test.each([
+  null,
+  { scopeKey: "device:other", store: "local", id: "a" },
+  { scopeKey: "device:test", store: "supabase", id: "a" },
+  { scopeKey: "device:test", store: "local", id: "deleted" },
+])("unverified identity never suggests a roster athlete: %j", async recordingAthleteRef => {
+  await call("open", source(), { athleteId: "a", athleteName: "Same name", recordingAthleteRef });
+  expect(controller.state.context.suggestedAthleteId).toBe("");
+});
+
+test("duplicate roster IDs cannot provide an unambiguous suggestion", async () => {
+  props.athletes = [{ id: "a" }, { id: "a" }]; await render();
+  await call("open", source(), { recordingAthleteRef: { scopeKey: "device:test", store: "local", id: "a" } });
+  expect(controller.state.context.suggestedAthleteId).toBe("");
+});

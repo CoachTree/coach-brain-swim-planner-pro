@@ -221,7 +221,7 @@ test("builder → recording → finish stays private in Save/Favourite/Copy/PDF/
   Object.defineProperty(globalThis, "crypto", { configurable: true, value: require("crypto").webcrypto });
   try {
     await click("record-results");
-    expect(query("performance-athleteId").value).toBe(""); expect(query("performance-pool").value).toBe("25");
+    expect(query("performance-athleteId").value).toBe("a"); expect(query("performance-pool").value).toBe("25");
     expect(document.querySelector('[role="dialog"]')).not.toBeNull(); expect(document.body.style.pointerEvents).toBe("none");
     await click("generate-another-button"); expect(generateSession).toHaveBeenCalledTimes(1);
     await confirmPerformance(); expect(query("performance-recorder")).not.toBeNull();
@@ -325,4 +325,37 @@ test("hotfix: account switch isolates filled confirmation; explicit close/reopen
   await change("performance-athleteId", cloudAthleteId); await change("performance-count", "8"); await click("performance-confirmed");
   await act(async () => [...document.querySelector('[role="dialog"]').querySelectorAll("button")].find(b => b.textContent === "Close").click());
   await click("record-results"); expect(query("performance-athleteId").value).toBe(""); expect(query("performance-count").value).toBe(""); expect(query("performance-confirmed").checked).toBe(false);
+});
+
+test("explicit local selection is frozen at generation request time without protocol prefill", async () => {
+  await change("session-athlete-select", "a"); await click("generate-button");
+  await change("session-athlete-select", "b"); await tick(); await click("record-results");
+  expect(query("performance-athleteId").value).toBe("a");
+  expect(query("performance-confirmed").checked).toBe(false);
+  for (const key of ["task", "count", "distance", "effort"]) expect(query(`performance-${key}`).value).toBe("");
+  for (const key of ["recovery", "equipment", "target"]) expect(query(`performance-${key}`).value).toBe("unknown");
+});
+
+test("explicit cloud selection is suggested but account switches permanently invalidate old draft identity", async () => {
+  jest.spyOn(CloudAthletes, "list").mockResolvedValue([{ id: "a", name: "Same name" }]);
+  await setPilotAccess(); await change("session-athlete-select", "a"); await generate(); await click("record-results");
+  expect(query("performance-athleteId").value).toBe("a");
+  await setPilotAccess({ user: { id: "other-account" } }); await click("record-results");
+  expect(query("performance-athleteId").value).toBe("");
+  await setPilotAccess(); await click("record-results");
+  expect(query("performance-athleteId").value).toBe("");
+});
+
+test("account change during generation cannot lend new provenance to the pending selection", async () => {
+  await change("session-athlete-select", "a"); await click("generate-button");
+  jest.spyOn(CloudAthletes, "list").mockResolvedValue([{ id: "a", name: "Athlete A" }]);
+  await setPilotAccess(); await tick(); await click("record-results");
+  expect(query("performance-athleteId").value).toBe("");
+});
+
+test("saved profile IDs never inherit the previous explicit selection", async () => {
+  SavedSessions.upsert({ id: "legacy-prefill", name: "Legacy", session: { main_set: { distance_m: 400, items: ["4x100"] } }, profile: { athleteId: "a", unit: "m" } });
+  await change("session-athlete-select", "a"); await generate();
+  await tab("Session History"); await click("session-open-legacy-prefill"); await click("record-results");
+  expect(query("performance-athleteId").value).toBe("");
 });

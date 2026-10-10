@@ -60,3 +60,14 @@ test("loading a legacy session supplies one stable journal ID without modifying 
   expect(resetSessionDraft(draft).workingDraft.session_id).toBe(draft.originalDraft.session_id);
   expect(source.session_id).toBeUndefined();
 });
+
+test("recording identity is frozen in memory and never inferred from a saved profile", () => {
+  const ref = { scopeKey: "device:browser-local", store: "local", id: "a1", scopeVersion: 0 };
+  const draft = createSessionDraft(session(), profile, { recordingAthleteRef: ref });
+  ref.id = "other";
+  expect(draft.context.recordingAthleteRef.id).toBe("a1");
+  expect(Object.isFrozen(draft.context.recordingAthleteRef)).toBe(true);
+  expect(draft.profile.recordingAthleteRef).toBeUndefined();
+  expect(draft.workingDraft.recordingAthleteRef).toBeUndefined();
+  expect(createSessionDraft(session(), { ...profile, recordingAthleteRef: ref }).context.recordingAthleteRef).toBeNull();
+});

@@ -95,3 +95,17 @@ test("hotfix: all blocking states are explained beside Start, with access/storag
   expect(query("start").textContent).toBe("Checking access…"); expect(query("start-reason").textContent).toContain("Checking Pro access"); expect(query("start").matches(":disabled")).toBe(true);
   await render(undefined, { ...state, busy: true }); expect(query("start-reason").textContent).toContain("Starting recording"); expect(query("start").matches(":disabled")).toBe(true);
 });
+
+test("verified suggestion is editable, unchecked, and never reapplied on rerender", async () => {
+  await act(async () => root.render(null));
+  const roster = [{ id: "a", name: "Same" }, { id: "b", name: "Same" }];
+  const suggested = { ...state, context: { ...state.context, suggestedAthleteId: "a" }, source: { plannedTextSnapshot: ["2 x (4 x 100) with fins hard"] } };
+  await render(roster, suggested);
+  expect(query("athleteId").value).toBe("a"); expect(query("confirmed").checked).toBe(false);
+  for (const key of ["task", "count", "distance", "effort", "startType"]) expect(query(key).value).toBe("");
+  for (const key of ["recovery", "equipment", "target"]) expect(query(key).value).toBe("unknown");
+  await change("athleteId", "b"); await render(roster, suggested);
+  expect(query("athleteId").value).toBe("b");
+  await change("athleteId", ""); await render(roster, suggested);
+  expect(query("athleteId").value).toBe(""); expect(onStart).not.toHaveBeenCalled();
+});

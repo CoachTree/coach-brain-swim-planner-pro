@@ -26,7 +26,8 @@ function localDate() {
 }
 
 export default function PerformanceConfirmation({ athletes, state, onStart }) {
-  const [form, setForm] = useState(() => ({ athleteId: "", date: localDate(),
+  const [form, setForm] = useState(() => ({ athleteId: athletes.filter(a => String(a.id) === state.context.suggestedAthleteId).length === 1
+    ? state.context.suggestedAthleteId : "", date: localDate(),
     unit: ["m", "yd"].includes(state.context.unit) ? state.context.unit : "",
     pool: [25, 50].includes(state.context.poolLength) ? String(state.context.poolLength) : "",
     stroke: state.context.stroke === "IM" ? "individual_medley" : state.context.stroke || "",
@@ -107,7 +108,7 @@ export default function PerformanceConfirmation({ athletes, state, onStart }) {
         <input type="checkbox" checked={form.selectedEquipment.includes(value)} onChange={e => update("selectedEquipment", e.target.checked ? [...form.selectedEquipment, value] : form.selectedEquipment.filter(v => v !== value))} />{readable(value)}</label>)}</div>}
       {unsupported && <p role="alert">This pilot supports one uniform segment with supported conditions. These conditions cannot be represented safely.</p>}
       <p className="text-sm">Unknown conditions and generic drill, skill or choice work cannot establish Exact comparability. Some summary metrics will be unavailable.</p>
-      <label className="flex items-center gap-3 min-h-12"><input data-testid="performance-confirmed" type="checkbox" checked={form.confirmed} onChange={e => update("confirmed", e.target.checked)} />I confirm this is the actual uniform segment, not a flattened set of rounds.</label>
+      <label className="flex items-center gap-3 min-h-12"><input data-testid="performance-confirmed" type="checkbox" checked={form.confirmed} onChange={e => update("confirmed", e.target.checked)} />I confirm the selected athlete and actual uniform segment; this is not a flattened set of rounds.</label>
       <p id="performance-start-reason" data-testid="performance-start-reason" role="status">{blockingReason}</p>
       <button data-testid="performance-start" aria-describedby={blockingReason ? "performance-start-reason" : undefined} className="w-full min-h-12 bg-[#003366] text-white rounded px-4 disabled:opacity-50" disabled={!!blockingReason} type="submit">{state.checkingAccess ? "Checking access…" : state.busy ? "Starting…" : "Start Recording"}</button>
     </fieldset>

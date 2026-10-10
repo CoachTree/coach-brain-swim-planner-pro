@@ -33,6 +33,8 @@ export function createSessionDraft(session, profile = {}, knownContext = {}, fav
   const pool = /^(25|50)(m|y|yd)$/.exec(profile.poolType || "");
   const context = freeze(cloneDraftValue({
     ...frozenProfile,
+    // Only explicit in-memory selection provenance can suggest recording identity.
+    recordingAthleteRef: knownContext.recordingAthleteRef || null,
     poolLength: pool ? Number(pool[1]) : undefined,
     // Missing legacy inputs stay undefined; [] and null mean known none/no target.
     equipment: Object.prototype.hasOwnProperty.call(knownContext, "equipment") ? knownContext.equipment : profile.equipment,

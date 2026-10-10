@@ -90,8 +90,14 @@ export function usePerformanceRecorder({ scopeKey, athleteStore, athletes, enabl
     open(source, context = {}) {
       if (!permitted() || flight.current || current.current.recording?.performance.status === "draft") return;
       pendingStart.current = null;
+      const candidate = context.recordingAthleteRef;
+      const validCandidate = candidate && candidate.scopeKey === access.current.scopeKey
+        && candidate.store === access.current.athleteStore && typeof candidate.id === "string"
+        && /^[A-Za-z0-9_-]{1,128}$/.test(candidate.id)
+        && access.current.athletes.filter(a => String(a.id) === candidate.id).length === 1;
       publish({ ...empty(), phase: "confirm", source: { ...source, plannedTextSnapshot: [...source.plannedTextSnapshot] },
-        context: { unit: context.unit, poolLength: context.poolLength, stroke: context.stroke } });
+        context: { unit: context.unit, poolLength: context.poolLength, stroke: context.stroke,
+          suggestedAthleteId: validCandidate ? candidate.id : "" } });
     },
     start({ athleteId, plannedDefinition, performedDate, timezone }) {
       if (flight.current || current.current.phase !== "confirm" || !permitted()) return Promise.resolve(false);

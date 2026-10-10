@@ -106,6 +106,7 @@ export default function SwimPlanner() {
   const [athletes, setAthletes] = useState([]);
   const [athleteRosterScope, setAthleteRosterScope] = useState(null);
   const [selectedAthleteId, setSelectedAthleteId] = useState("");
+  const [recordingAthleteRef, setRecordingAthleteRef] = useState(null);
   const [age, setAge] = useState(DEFAULT_AGE);
   const [level, setLevel] = useState("intermediate");
   const [stroke, setStroke] = useState("freestyle");
@@ -129,6 +130,12 @@ export default function SwimPlanner() {
   const athleteStore = access.isPro && access.user ? CloudAthletes : LocalAthletes;
   const favouriteStore = selectFavouriteStore(access, LocalFavourites, CloudFavourites);
   const performanceScope = access.isPro && access.user ? `account:${access.user.id}` : "device:browser-local";
+  const recordingStore = access.isPro && access.user ? "supabase" : "local";
+  // A boundary permanently invalidates earlier selections, even after switching back.
+  const selectionScope = useRef({ scopeKey: performanceScope, store: recordingStore, version: 0 });
+  if (selectionScope.current.scopeKey !== performanceScope || selectionScope.current.store !== recordingStore) {
+    selectionScope.current = { scopeKey: performanceScope, store: recordingStore, version: selectionScope.current.version + 1 };
+  }
   const rosterScopeRef = useRef(performanceScope);
   rosterScopeRef.current = performanceScope;
   const performanceAthletes = athleteRosterScope === performanceScope ? athletes.filter(a => /^[A-Za-z0-9_-]{1,128}$/.test(String(a.id || ""))) : [];
@@ -142,7 +149,9 @@ export default function SwimPlanner() {
     recorder.open({ sessionId: /^[A-Za-z0-9_-]{1,128}$/.test(draft.workingDraft.session_id || "") ? draft.workingDraft.session_id : null,
       blockId: block.generatedKey, draftRevision: draft.revision, changeSequence: draft.changeSequence,
       plannedTextSnapshot: block.items || [] },
-    { unit: draft.context.unit, poolLength: draft.context.poolLength, stroke: draft.context.stroke });
+    { unit: draft.context.unit, poolLength: draft.context.poolLength, stroke: draft.context.stroke,
+      recordingAthleteRef: draft.context.recordingAthleteRef?.scopeVersion === selectionScope.current.version
+        ? draft.context.recordingAthleteRef : null });
   };
 
   useEffect(() => {
@@ -176,6 +185,7 @@ export default function SwimPlanner() {
   };
 
   const restoreProfile = (savedProfile = {}) => {
+    setRecordingAthleteRef(null);
     if (typeof savedProfile.age !== "undefined") setAge(savedProfile.age);
     if (savedProfile.level) setLevel(savedProfile.level);
     if (savedProfile.stroke) setStroke(savedProfile.stroke);
@@ -228,6 +238,10 @@ team: athletes.find(
   );
 
   const handleSelectAthlete = (athlete) => {
+    const matches = performanceAthletes.filter(a => String(a.id) === String(athlete?.id));
+    setRecordingAthleteRef(athlete && matches.length === 1 ? {
+      scopeKey: performanceScope, store: recordingStore, id: String(athlete.id), scopeVersion: selectionScope.current.version,
+    } : null);
     if (!athlete) {
       setSelectedAthleteId("");
       return;
@@ -259,7 +273,8 @@ team: athletes.find(
     await new Promise((resolve) => setTimeout(resolve, 60));
     try {
       const data = generateSession(request.input);
-      loadDraft(data, request.profile, { equipment: request.input.equipment, paceTarget: request.input.paceTarget });
+      loadDraft(data, request.profile, { equipment: request.input.equipment, paceTarget: request.input.paceTarget,
+        recordingAthleteRef: request.recordingAthleteRef?.scopeVersion === selectionScope.current.version ? request.recordingAthleteRef : null });
       trackGenerateSession({
         stroke: request.input.stroke,
         goal: request.input.goal,
@@ -293,6 +308,7 @@ team: athletes.find(
     }
     requestReplacement({
       type: "generate",
+      recordingAthleteRef: recordingAthleteRef?.scopeVersion === selectionScope.current.version ? recordingAthleteRef : null,
       profile,
       input: { age: Number(age), level, stroke, goal, distance, intensity, poolType, unit, equipment, includeSprintFinisher, sessionRole, paceTarget },
     });
