@@ -204,3 +204,45 @@ test("duplicate roster IDs cannot provide an unambiguous suggestion", async () =
   await call("open", source(), { recordingAthleteRef: { scopeKey: "device:test", store: "local", id: "a" } });
   expect(controller.state.context.suggestedAthleteId).toBe("");
 });
+
+const historyArgs = () => ({ athleteId: "b", plannedDefinition: definition(), confirmed: true });
+test.each([["device:test", "local"], ["account:user-a", "supabase"]])("history reads verified identity in %s without recording mutations", async (scopeKey, athleteStore) => {
+  props = { ...props, scopeKey, athleteStore }; await render();
+  const spy = jest.spyOn(store, "findLatestExact").mockResolvedValue({ recording: null, warnings: [] });
+  await call("open", source()); expect(spy).not.toHaveBeenCalled();
+  await call("findPreviousExact", historyArgs());
+  expect(spy).toHaveBeenCalledWith({ scopeKey, athleteRef: { store: athleteStore, id: "b" }, plannedDefinition: definition(), excludeOccurrenceId: null });
+  expect(serial).toBe(0); expect(controller.state.busy).toBe(false); expect(controller.state.error).toBeNull();
+});
+test.each(["checking", "loss", "account", "store", "deleted", "reopen", "start"])("late history is rejected after %s", async boundary => {
+  let resolve; jest.spyOn(store, "findLatestExact").mockImplementation(() => new Promise(r => { resolve = r; }));
+  await call("open", source()); let pending;
+  await act(async () => { pending = controller.findPreviousExact(historyArgs()); });
+  if (boundary === "checking") { props.checkingAccess = true; await render(); props.checkingAccess = false; await render(); }
+  if (boundary === "loss") { props.enabled = false; await render(); props.enabled = true; await render(); }
+  if (boundary === "account") { props.scopeKey = "account:b"; props.athleteStore = "supabase"; await render(); props.scopeKey = "device:test"; props.athleteStore = "local"; await render(); }
+  if (boundary === "store") { props.athleteStore = "supabase"; await render(); props.athleteStore = "local"; await render(); }
+  if (boundary === "deleted") { props.athletes = [{ id: "a", name: "Same name" }]; await render(); }
+  if (boundary === "reopen") { await call("requestClose"); await call("open", source()); }
+  if (boundary === "start") { await call("start", args()); expect(controller.state.phase).toBe("record"); await save(); }
+  let result; await act(async () => { resolve({ recording: null, warnings: [] }); result = await pending; });
+  expect(result).toBeNull(); expect(controller.state.error).toBeNull();
+});
+test("history failure remains separate and pending Start occurrence is excluded", async () => {
+  jest.spyOn(store, "startRecording").mockRejectedValue({ code: "storage_failure" });
+  const spy = jest.spyOn(store, "findLatestExact").mockRejectedValue(new Error("read failed"));
+  await call("open", source()); await call("start", args());
+  const error = controller.state.error;
+  await expect(controller.findPreviousExact(historyArgs())).rejects.toThrow("read failed");
+  expect(spy.mock.calls[0][0].excludeOccurrenceId).toBe("id-1");
+  expect(spy.mock.calls[0][0].excludeOccurrenceId).not.toBe(source().sessionId);
+  expect(controller.state.error).toBe(error); expect(controller.state.busy).toBe(false);
+});
+test("history gates unknown protocols, missing confirmation, and ambiguous athletes", async () => {
+  const spy = jest.spyOn(store, "findLatestExact"); await call("open", source());
+  await call("findPreviousExact", { ...historyArgs(), confirmed: false });
+  const unknown = definition(); unknown.segment.equipment = null;
+  await call("findPreviousExact", { ...historyArgs(), plannedDefinition: unknown });
+  props.athletes = [{ id: "b" }, { id: "b" }]; await render();
+  await call("findPreviousExact", historyArgs()); expect(spy).not.toHaveBeenCalled();
+});

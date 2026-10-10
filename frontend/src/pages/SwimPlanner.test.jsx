@@ -359,3 +359,15 @@ test("saved profile IDs never inherit the previous explicit selection", async ()
   await tab("Session History"); await click("session-open-legacy-prefill"); await click("record-results");
   expect(query("performance-athleteId").value).toBe("");
 });
+
+test("explicit Exact memory uses cloud identity and is hidden after account switching", async () => {
+  const lookup = jest.spyOn(performanceStore, "findLatestExact").mockResolvedValue({ recording: null, warnings: [] });
+  await openCloudConfirmation(); expect(lookup).not.toHaveBeenCalled();
+  await click("performance-history-lookup");
+  expect(lookup).toHaveBeenCalledWith(expect.objectContaining({ scopeKey: "account:pilot-account-a", athleteRef: { store: "supabase", id: cloudAthleteId }, excludeOccurrenceId: null }));
+  expect(document.querySelector('[role="dialog"]').textContent).toContain("No eligible Exact result");
+  expect(performanceStore.startRecording).not.toHaveBeenCalled();
+  await setPilotAccess({ user: { id: "other-account" } }); await setPilotAccess(); await click("record-results");
+  expect(document.querySelector('[role="dialog"]').textContent).not.toContain("No eligible Exact result");
+  expect(lookup).toHaveBeenCalledTimes(1);
+});

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createLocalPerformanceStore } from "@/lib/localPerformanceStore";
 import { normalizePerformance } from "@/lib/performanceResults";
+import { comparePerformanceDefinitions, normalizePerformanceDefinition } from "@/lib/performanceDefinition";
 import { composePerformance } from "@/lib/performanceRecording";
 
 export const RECORDING_ERROR_MESSAGES = Object.freeze({
@@ -35,6 +36,9 @@ export function usePerformanceRecorder({ scopeKey, athleteStore, athletes, enabl
   if (!repo.current) repo.current = repository || createLocalPerformanceStore();
   const [state, setState] = useState(empty);
   const current = useRef(state), pendingStart = useRef(null), flight = useRef(false), epoch = useRef(0);
+  const historyEpoch = useRef(0), historyRequest = useRef(0), historyBoundary = useRef("");
+  const boundary = JSON.stringify([scopeKey, athleteStore, enabled, checkingAccess, athletes.map(a => String(a.id)).sort()]);
+  if (historyBoundary.current !== boundary) { historyBoundary.current = boundary; historyEpoch.current += 1; }
   const access = useRef(null);
   access.current = { scopeKey, athleteStore, athletes, enabled, checkingAccess };
   const boundScope = useRef(scopeKey), boundEnabled = useRef(enabled);
@@ -46,7 +50,7 @@ export function usePerformanceRecorder({ scopeKey, athleteStore, athletes, enabl
     boundScope.current = scopeKey; boundEnabled.current = enabled; epoch.current += 1;
     pendingStart.current = null; current.current = empty(); setState(current.current);
   }, [scopeKey, enabled, checkingAccess]);
-  useEffect(() => () => { epoch.current += 1; }, []);
+  useEffect(() => () => { epoch.current += 1; historyEpoch.current += 1; }, []);
   const visible = () => boundScope.current === access.current.scopeKey && boundEnabled.current
     && (access.current.enabled || access.current.checkingAccess);
   const permitted = () => visible() && access.current.enabled && !access.current.checkingAccess;
@@ -86,9 +90,30 @@ export function usePerformanceRecorder({ scopeKey, athleteStore, athletes, enabl
     return { status: p.status, interrupted: p.interrupted, materiallyModified: p.materiallyModified, reps: p.reps, coachNote: p.coachNote, ...overrides };
   }
   return {
-    state: { ...(visible() ? state : empty()), checkingAccess },
+    state: { ...(visible() ? state : empty()), checkingAccess, historyVersion: historyEpoch.current, historyEnabled: permitted() },
+    async findPreviousExact({ athleteId, plannedDefinition, confirmed }) {
+      const normalized = normalizePerformanceDefinition(plannedDefinition);
+      const member = () => access.current.athletes.filter(a => String(a.id) === athleteId).length === 1;
+      if (!confirmed || !permitted() || flight.current || current.current.phase !== "confirm" || !member()
+        || !normalized.ok || normalized.definition.segment.repeatCount > 10000
+        || comparePerformanceDefinitions(normalized.definition, normalized.definition).classification !== "EXACT") return null;
+      const token = historyEpoch.current, request = ++historyRequest.current;
+      const scope = access.current.scopeKey, store = access.current.athleteStore;
+      const valid = () => token === historyEpoch.current && request === historyRequest.current
+        && permitted() && current.current.phase === "confirm" && member()
+        && access.current.scopeKey === scope && access.current.athleteStore === store;
+      try {
+        const result = await repo.current.findLatestExact({ scopeKey: scope, athleteRef: { store, id: athleteId },
+          plannedDefinition: normalized.definition, excludeOccurrenceId: pendingStart.current?.input.occurrenceId || null });
+        return valid() ? result : null;
+      } catch (error) {
+        if (valid()) throw error;
+        return null;
+      }
+    },
     open(source, context = {}) {
       if (!permitted() || flight.current || current.current.recording?.performance.status === "draft") return;
+      historyEpoch.current += 1;
       pendingStart.current = null;
       const candidate = context.recordingAthleteRef;
       const validCandidate = candidate && candidate.scopeKey === access.current.scopeKey
@@ -101,6 +126,7 @@ export function usePerformanceRecorder({ scopeKey, athleteStore, athletes, enabl
     },
     start({ athleteId, plannedDefinition, performedDate, timezone }) {
       if (flight.current || current.current.phase !== "confirm" || !permitted()) return Promise.resolve(false);
+      historyEpoch.current += 1;
       const athlete = access.current.athletes.find(a => String(a.id) === athleteId);
       if (!athlete) { publish({ issue: "Select a current roster athlete before starting." }); return Promise.resolve(false); }
       return run(async () => {
@@ -143,6 +169,7 @@ export function usePerformanceRecorder({ scopeKey, athleteStore, athletes, enabl
     },
     requestClose() {
       if (!permitted() || flight.current) return;
+      historyEpoch.current += 1;
       if (current.current.phase === "record") publish({ closeRequested: true });
       else publish({ phase: "closed", closeRequested: false, error: null });
     },

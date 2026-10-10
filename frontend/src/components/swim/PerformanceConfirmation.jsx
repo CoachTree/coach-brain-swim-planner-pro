@@ -1,6 +1,8 @@
-import { useState } from "react";
-import { normalizePerformanceDefinition } from "@/lib/performanceDefinition";
-import { parsePerformanceTime } from "@/lib/performanceTime";
+import { useEffect, useRef, useState } from "react";
+import { comparePerformanceDefinitions, normalizePerformanceDefinition } from "@/lib/performanceDefinition";
+import { calculatePerformanceMetrics } from "@/lib/performanceMetrics";
+import { composePerformance } from "@/lib/performanceRecording";
+import { formatPerformanceTime, parsePerformanceTime } from "@/lib/performanceTime";
 
 const equipmentOptions = ["fins", "paddles", "pull_buoy", "kickboard", "snorkel", "ankle_band"];
 const control = "block w-full min-h-12 border rounded p-2 bg-white";
@@ -25,7 +27,7 @@ function localDate() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-export default function PerformanceConfirmation({ athletes, state, onStart }) {
+export default function PerformanceConfirmation({ athletes, state, onStart, onFindPreviousExact }) {
   const [form, setForm] = useState(() => ({ athleteId: athletes.filter(a => String(a.id) === state.context.suggestedAthleteId).length === 1
     ? state.context.suggestedAthleteId : "", date: localDate(),
     unit: ["m", "yd"].includes(state.context.unit) ? state.context.unit : "",
@@ -37,6 +39,7 @@ export default function PerformanceConfirmation({ athletes, state, onStart }) {
   const [issue, setIssue] = useState("");
   const [fieldErrors, setFieldErrors] = useState({});
   const update = (key, value) => {
+    invalidateHistory();
     setForm(f => ({ ...f, [key]: value })); setIssue("");
     setFieldErrors(errors => ({ ...errors, [key]: undefined, ...(key === "recovery" ? { recoveryTime: undefined } : {}) }));
   };
@@ -57,19 +60,48 @@ export default function PerformanceConfirmation({ athletes, state, onStart }) {
       : "Select an athlete above in this confirmation to start recording.")
     : unsupported ? "Choose one uniform segment with supported conditions above."
     : !form.confirmed ? "Check the confirmation box above to start recording." : "";
-  async function submit(e) {
-    e.preventDefault();
-    if (blockingReason) return;
-    setIssue(""); setFieldErrors({});
-    if (form.equipment === "selected" && !form.selectedEquipment.length) return setIssue("Select the equipment used, or explicitly choose None or Unknown.");
+  function normalizeForm() {
     const seconds = text => { const p = parsePerformanceTime(text); return p.ok ? p.value.hundredths / 100 : NaN; };
-    const result = normalizePerformanceDefinition({ schemaVersion: 1, unit: form.unit, poolLength: Number(form.pool), segment: {
+    return normalizePerformanceDefinition({ schemaVersion: 1, unit: form.unit, poolLength: Number(form.pool), segment: {
       task: form.task, stroke: form.stroke, repeatCount: Number(form.count), repeatDistance: Number(form.distance),
       startType: form.startType || null, effort: form.effort || null,
       recovery: form.recovery === "unknown" ? null : form.recovery === "none" ? { mode: "none" } : { mode: form.recovery, seconds: seconds(form.recoveryTime) },
       equipment: form.equipment === "unknown" ? null : form.equipment === "none" ? [] : form.selectedEquipment,
       target: form.target === "range" ? { state: "range", minSeconds: seconds(form.min), maxSeconds: seconds(form.max) } : { state: form.target },
     } });
+  }
+  const normalized = normalizeForm();
+  const historyReason = blockingReason || (!state.historyEnabled || !onFindPreviousExact ? "Previous Exact memory requires confirmed Pro access."
+    : athletes.filter(a => String(a.id) === form.athleteId).length !== 1 ? "Select an unambiguous current roster athlete."
+    : (form.equipment === "selected" && !form.selectedEquipment.length) || !normalized.ok || normalized.definition.segment.repeatCount > 10000
+      ? "Complete a valid uniform segment to look up Exact memory."
+    : comparePerformanceDefinitions(normalized.definition, normalized.definition).classification !== "EXACT"
+      ? "Exact memory requires known conditions and fully specified work. You can still record this segment." : "");
+  const [history, setHistory] = useState(null);
+  const historyRequest = useRef(0);
+  useEffect(() => { historyRequest.current += 1; setHistory(null); }, [state.historyVersion, historyReason]);
+  useEffect(() => () => { historyRequest.current += 1; }, []);
+  const invalidateHistory = () => { historyRequest.current += 1; setHistory(null); };
+  const shownHistory = !historyReason && history?.form === form && history.version === state.historyVersion ? history : null;
+  async function lookup() {
+    if (historyReason) return;
+    const request = ++historyRequest.current;
+    const snapshot = { form, version: state.historyVersion };
+    setHistory({ ...snapshot, status: "loading" });
+    try {
+      const result = await onFindPreviousExact({ athleteId: form.athleteId, plannedDefinition: normalized.definition, confirmed: form.confirmed });
+      if (request === historyRequest.current) setHistory(result ? { ...snapshot, status: "ready", ...result } : null);
+    } catch {
+      if (request === historyRequest.current) setHistory({ ...snapshot, status: "error" });
+    }
+  }
+  async function submit(e) {
+    e.preventDefault();
+    invalidateHistory();
+    if (blockingReason) return;
+    setIssue(""); setFieldErrors({});
+    if (form.equipment === "selected" && !form.selectedEquipment.length) return setIssue("Select the equipment used, or explicitly choose None or Unknown.");
+    const result = normalized;
     if (!result.ok) {
       const errors = Object.fromEntries(result.errors.map(error => validationMessages[error.path] || ["protocol", "Check the repetitions and distance for this uniform segment."]));
       setFieldErrors(errors); setIssue(Object.values(errors).join(" ")); return;
@@ -109,9 +141,48 @@ export default function PerformanceConfirmation({ athletes, state, onStart }) {
       {unsupported && <p role="alert">This pilot supports one uniform segment with supported conditions. These conditions cannot be represented safely.</p>}
       <p className="text-sm">Unknown conditions and generic drill, skill or choice work cannot establish Exact comparability. Some summary metrics will be unavailable.</p>
       <label className="flex items-center gap-3 min-h-12"><input data-testid="performance-confirmed" type="checkbox" checked={form.confirmed} onChange={e => update("confirmed", e.target.checked)} />I confirm the selected athlete and actual uniform segment; this is not a flattened set of rounds.</label>
+      <section aria-label="Previous Exact memory" className="space-y-2" data-testid="performance-history">
+        <p className="font-semibold">Previous Exact memory</p>
+        {historyReason && <p id="performance-history-reason" className="text-sm">{historyReason}</p>}
+        <button type="button" className="min-h-12 border rounded px-4 disabled:opacity-50" data-testid="performance-history-lookup"
+          disabled={!!historyReason || shownHistory?.status === "loading"} aria-describedby={historyReason ? "performance-history-reason" : undefined} onClick={lookup}>
+          {shownHistory?.status === "error" ? "Retry" : "Show previous Exact result"}
+        </button>
+        {shownHistory?.status === "loading" && <p role="status">Looking for an eligible Exact result on this device…</p>}
+        {shownHistory?.status === "error" && <p role="alert">Previous results couldn’t be loaded. You can still start recording.</p>}
+        {shownHistory?.status === "ready" && <>
+          {shownHistory.recording ? <ExactMemory recording={shownHistory.recording} athlete={athletes.find(a => String(a.id) === form.athleteId)} />
+            : <p role="status">No eligible Exact result found on this device for this athlete and confirmed segment.</p>}
+          {!!shownHistory.warnings?.length && <p role="status">Some stored records could not be read and were excluded.</p>}
+        </>}
+      </section>
       <p id="performance-start-reason" data-testid="performance-start-reason" role="status">{blockingReason}</p>
       <button data-testid="performance-start" aria-describedby={blockingReason ? "performance-start-reason" : undefined} className="w-full min-h-12 bg-[#003366] text-white rounded px-4 disabled:opacity-50" disabled={!!blockingReason} type="submit">{state.checkingAccess ? "Checking access…" : state.busy ? "Starting…" : "Start Recording"}</button>
     </fieldset>
     {(issue || state.issue || state.error) && <p role="alert">{issue || state.issue || state.error.message}</p>}
   </form>;
+}
+
+// Display only: history never populates the confirmation or changes stored precision.
+function ExactMemory({ recording, athlete }) {
+  const { occurrence, performance } = recording;
+  const metrics = calculatePerformanceMetrics(composePerformance(occurrence, performance)).metrics;
+  if (!metrics?.trendEligible) return <p role="alert">This historical result is not fully comparable.</p>;
+  const definition = occurrence.plannedDefinition, segment = definition.segment;
+  const precision = Math.min(...performance.reps.filter(r => r.time).map(r => r.time.precision));
+  const display = seconds => {
+    const quantum = 10 ** (2 - precision);
+    return formatPerformanceTime({ hundredths: Math.round(seconds * 100 / quantum) * quantum, precision });
+  };
+  return <div data-testid="performance-history-result" className="space-y-1">
+    <p className="font-semibold">Latest eligible Exact result on this device</p>
+    <p>{athlete?.name || "Athlete"} ({performance.athleteRef.id})</p>
+    <p>Performed: {occurrence.performedDate}</p>
+    <p>{segment.repeatCount} × {segment.repeatDistance}{definition.unit} · {readable(segment.task)} · {readable(segment.stroke)} · {definition.poolLength}{definition.unit} pool</p>
+    <p>Start: {readable(segment.startType)} · Recovery: {readable(segment.recovery.mode)}{segment.recovery.mode !== "none" ? ` ${segment.recovery.seconds}s` : ""}</p>
+    <p>Equipment: {segment.equipment.length ? segment.equipment.map(readable).join(", ") : "None"} · Effort: {readable(segment.effort)}</p>
+    <p>Target: {segment.target.state === "range" ? `${segment.target.minSeconds}–${segment.target.maxSeconds}s` : "None"}</p>
+    <p>Completed {metrics.completionCount}/{metrics.plannedRepCount} · Timed {metrics.timedRepCount}/{metrics.plannedRepCount}</p>
+    <p>Average: {display(metrics.averageSeconds)} · Best: {display(metrics.bestSeconds)}</p>
+  </div>;
 }

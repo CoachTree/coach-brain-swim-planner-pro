@@ -109,3 +109,57 @@ test("verified suggestion is editable, unchecked, and never reapplied on rerende
   await change("athleteId", ""); await render(roster, suggested);
   expect(query("athleteId").value).toBe(""); expect(onStart).not.toHaveBeenCalled();
 });
+
+const historyRoster = [{ id: "a", name: "Same" }, { id: "b", name: "Same" }];
+const historyRender = async (lookup, overrides = {}, roster = historyRoster) => {
+  await act(async () => root.render(<PerformanceConfirmation athletes={roster} state={{ ...state, historyEnabled: true, historyVersion: 1, ...overrides }} onStart={onStart} onFindPreviousExact={lookup} />));
+};
+const readyHistory = async lookup => { await historyRender(lookup); await exactProtocol(); await change("athleteId", "a"); };
+test("history is explicit and gates confirmation, validation, Exact and supported structure", async () => {
+  const lookup = jest.fn().mockResolvedValue({ recording: null, warnings: [] });
+  await historyRender(lookup); expect(lookup).not.toHaveBeenCalled(); expect(query("history-lookup").disabled).toBe(true);
+  await exactProtocol(); await change("athleteId", "b"); expect(query("history-lookup").disabled).toBe(false);
+  for (const [key, value, restore] of [["equipment", "unknown", "none"], ["equipment", "selected", "none"], ["count", "0", "8"], ["structure", "unsupported", "uniform"], ["task", "drill", "swim"]]) {
+    await change(key, value); expect(query("history-lookup").disabled).toBe(true); await change(key, restore);
+  }
+  await click("confirmed"); expect(query("history-lookup").disabled).toBe(true); await click("confirmed");
+  await change("count", "4"); await click("history-lookup");
+  expect(lookup.mock.calls[0][0]).toMatchObject({ athleteId: "b", confirmed: true, plannedDefinition: { segment: { repeatCount: 4, equipment: [], recovery: { mode: "send_off", seconds: 90 } } } });
+  expect(container.textContent).toContain("No eligible Exact result");
+});
+test("history error can retry and shows eligible result and corruption warning", async () => {
+  const lookup = jest.fn().mockRejectedValueOnce(new Error("read")); await readyHistory(lookup);
+  await click("history-lookup"); expect(container.textContent).toContain("You can still start recording"); expect(query("start").disabled).toBe(false);
+  const definition = lookup.mock.calls[0][0].plannedDefinition;
+  lookup.mockResolvedValue({ warnings: [{ code: "invalid_data" }], recording: {
+    occurrence: { segmentId: "old", performedDate: "2026-10-01", plannedDefinition: definition },
+    performance: { athleteRef: { store: "local", id: "a" }, status: "completed", interrupted: false, materiallyModified: false,
+      reps: Array.from({ length: 8 }, (_, i) => ({ repIndex: i, plannedRepIndex: i, roundIndex: 0, outcome: "completed", time: { hundredths: 6750, precision: 1 } })) },
+  } });
+  await click("history-lookup"); expect(query("history-result").textContent).toContain("Performed: 2026-10-01");
+  expect(query("history-result").textContent).toContain("Completed 8/8 · Timed 8/8");
+  expect(query("history-result").textContent).toContain("Average: 1:07.5");
+  expect(container.textContent).toContain("Some stored records could not be read");
+  await change("athleteId", "b"); expect(query("history-result")).toBeNull(); expect(lookup).toHaveBeenCalledTimes(2);
+});
+test.each(["edit", "checkbox", "start", "access", "deleted", "unmount"])("pending history is cleared by %s without blocking Start", async boundary => {
+  let resolve; const lookup = jest.fn().mockImplementation(() => new Promise(r => { resolve = r; }));
+  await readyHistory(lookup); await click("history-lookup"); expect(container.textContent).toContain("Looking for"); expect(query("start").disabled).toBe(false);
+  if (boundary === "edit") { await change("count", "4"); await change("count", "8"); }
+  if (boundary === "checkbox") { await click("confirmed"); await click("confirmed"); }
+  if (boundary === "start") { await click("start"); expect(onStart).toHaveBeenCalledTimes(1); }
+  if (boundary === "access") { await historyRender(lookup, { checkingAccess: true, historyVersion: 2 }); await historyRender(lookup, { historyVersion: 3 }); }
+  if (boundary === "deleted") { await historyRender(lookup, {}, [{ id: "b", name: "Same" }]); await historyRender(lookup); }
+  if (boundary === "unmount") { await act(async () => root.render(null)); await historyRender(lookup); }
+  await act(async () => resolve({ recording: null, warnings: [] }));
+  expect(container.textContent).not.toContain("No eligible Exact result"); expect(container.textContent).not.toContain("Looking for");
+});
+
+test("older lookup cannot replace a newer edited-athlete lookup", async () => {
+  const pending = []; const lookup = jest.fn().mockImplementation(() => new Promise(resolve => pending.push(resolve)));
+  await readyHistory(lookup); await click("history-lookup"); await change("athleteId", "b"); await click("history-lookup");
+  await act(async () => pending[1]({ recording: null, warnings: [] }));
+  await act(async () => pending[0]({ recording: null, warnings: [{ code: "invalid_data" }] }));
+  expect(container.textContent).toContain("No eligible Exact result");
+  expect(container.textContent).not.toContain("Some stored records");
+});

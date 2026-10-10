@@ -327,7 +327,7 @@ team: athletes.find(
           <DialogDescription>Record one athlete’s confirmed segment. Stored on this device.</DialogDescription>
           {recorder.state.checkingAccess && <p role="status">Checking Pro access… Your recording and entries are preserved.</p>}
           <fieldset disabled={recorder.state.checkingAccess} className="min-w-0" aria-busy={recorder.state.checkingAccess}>
-          {recorder.state.phase === "confirm" && <PerformanceConfirmation athletes={performanceAthletes} state={recorder.state} onStart={recorder.start} />}
+          {recorder.state.phase === "confirm" && <PerformanceConfirmation athletes={performanceAthletes} state={recorder.state} onStart={recorder.start} onFindPreviousExact={recorder.findPreviousExact} />}
           {recorder.state.phase === "record" && <PerformanceRecorder key={recorder.state.viewKey} controller={recorder} />}
           {recorder.state.phase === "summary" && <PerformanceSummary recording={recorder.state.recording} athleteLabel={recorder.state.athleteLabel} onClose={recorder.requestClose} />}
           </fieldset>
