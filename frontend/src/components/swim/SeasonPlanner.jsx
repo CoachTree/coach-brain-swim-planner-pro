@@ -7,10 +7,12 @@ import { Input } from "@/components/ui/input";
 import TileGroup from "@/components/swim/TileGroup";
 import { copySeasonPlanText, generateSeasonPlan } from "@/lib/seasonPlanner";
 
+import { COMPETITION_EVENTS } from "@/lib/seasonPlannerInput";
+
 const LEVELS = ["beginner", "intermediate", "competitive", "national"];
-const EVENTS = ["50 free", "100 free", "200 free", "400 free", "distance", "IM", "stroke"];
-const SESSION_COUNTS = [3, 4, 5, 6, 7, 8];
-const DURATIONS = [60, 75, 90, 105, 120];
+
+const SESSION_COUNTS = Array.from({ length: 14 }, (_, i) => i + 1);
+const DURATIONS = Array.from({ length: 13 }, (_, i) => 60 + i * 15);
 const POOLS = ["25m", "50m", "yards"];
 const COURSE_TYPES = ["SCM", "LCM", "SCY"];
 const COURSE_LABELS = {
@@ -61,8 +63,8 @@ export default function SeasonPlanner() {
   const [targetMeetDate, setTargetMeetDate] = useState(defaultMeetISO());
   const [age, setAge] = useState(16);
   const [level, setLevel] = useState("competitive");
-  const [mainEvent, setMainEvent] = useState("100 free");
-  const [currentPBs, setCurrentPBs] = useState({ SCM: "", LCM: "", SCY: "" });
+  const [mainEvent, setMainEvent] = useState("100-freestyle-m");
+  const [currentPBs, setCurrentPBs] = useState({});
   const [targetCourse, setTargetCourse] = useState("LCM");
   const [goalTime, setGoalTime] = useState("");
   const [sessionsPerWeek, setSessionsPerWeek] = useState(5);
@@ -72,6 +74,7 @@ export default function SeasonPlanner() {
   const [taperPreference, setTaperPreference] = useState("auto");
   const [trainingStyle, setTrainingStyle] = useState("balanced modern");
   const [plan, setPlan] = useState(null);
+  const [pbError, setPBError] = useState(null);
 
   const input = useMemo(
     () => ({
@@ -79,8 +82,9 @@ export default function SeasonPlanner() {
       targetMeetDate,
       age: Number(age),
       level,
-      mainEvent,
-      currentPBs,
+      eventId: mainEvent,
+      // Other events remain untouched drafts, outside this generation request.
+      officialPBs: mainEvent ? { [mainEvent]: currentPBs[mainEvent] || {} } : {},
       targetCourse,
       goalTime,
       sessionsPerWeek,
@@ -109,6 +113,7 @@ export default function SeasonPlanner() {
   );
 
   const handleGenerate = () => {
+    setPBError(null);
     try {
       const result = generateSeasonPlan(input);
       setPlan(result);
@@ -120,7 +125,8 @@ export default function SeasonPlanner() {
         });
       }, 80);
     } catch (e) {
-      toast.error("Could not generate season plan");
+      if (e.pbField) setPBError({ ...e.pbField, message: e.message });
+      toast.error(e.message || "Could not generate season plan");
     }
   };
 
@@ -134,7 +140,9 @@ export default function SeasonPlanner() {
     }
   };
 
-  const volumeUnit = poolLength === "yards" ? "yd" : "m";
+  const volumeUnit = plan?.volumeEstimate.unit;
+  const selectedEvent = COMPETITION_EVENTS.find(e => e.id === mainEvent);
+  const changeEvent = id => { setMainEvent(id); setGoalTime(""); setPBError(null); };
 
   return (
     <div data-testid="season-planner-page">
@@ -152,6 +160,7 @@ export default function SeasonPlanner() {
       </div>
 
       <section className="space-y-10">
+        <p className="text-sm">Session duration is elapsed pool time including in-water rest, excluding separate dryland. Supported range: 60–240 minutes; 1–14 sessions per week.</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <FieldLabel>01 · Current date</FieldLabel>
@@ -187,27 +196,36 @@ export default function SeasonPlanner() {
 
         <TileGroup label="04 · Level" options={LEVELS} value={level} onChange={setLevel} testIdPrefix="season-level" columns={2} />
 
-        <TileGroup label="05 · Main event" options={EVENTS} value={mainEvent} onChange={setMainEvent} testIdPrefix="season-event" columns={2} />
+        <TileGroup label="05 · Main event" options={COMPETITION_EVENTS.filter(e => e.courses.includes(targetCourse)).map(e => e.id)} renderLabel={id => COMPETITION_EVENTS.find(e => e.id === id).label} value={mainEvent} onChange={changeEvent} testIdPrefix="season-event" columns={2} />
 
         <div>
-          <FieldLabel>06 · Current PB by course</FieldLabel>
+          <FieldLabel>06 · Coach-entered official race PB by course</FieldLabel>
+          {!selectedEvent && <p>Select a main event for this competition course before entering its official PB.</p>}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {COURSE_TYPES.map((course) => (
+            {(selectedEvent?.courses || []).map((course) => (
               <div key={course}>
                 <div className="text-xs font-display font-bold text-[#475569] mb-2">{COURSE_LABELS[course]}</div>
                 <Input
-                  value={currentPBs[course]}
-                  onChange={(e) =>
-                    setCurrentPBs((prev) => ({ ...prev, [course]: e.target.value }))
-                  }
+                  aria-label={`Official race PB ${selectedEvent.label} ${course}`}
+                  aria-invalid={pbError?.eventId === mainEvent && pbError?.course === course ? true : undefined}
+                  aria-describedby={pbError?.eventId === mainEvent && pbError?.course === course ? `season-pb-error-${course}` : undefined}
+                  value={currentPBs[mainEvent]?.[course] || ""}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setCurrentPBs((prev) => ({ ...prev, [mainEvent]: { ...prev[mainEvent], [course]: value } }));
+                    if (pbError?.eventId === mainEvent && pbError?.course === course) setPBError(null);
+                  }}
                   placeholder={course === "SCY" ? "e.g. 48.20" : "e.g. 55.20"}
                   className="h-14 rounded-sm border-[#CBD5E1] focus-visible:ring-[#003366] focus-visible:border-[#003366] font-display font-bold"
                 />
+                {pbError?.eventId === mainEvent && pbError?.course === course && (
+                  <p id={`season-pb-error-${course}`} role="alert" className="mt-2 text-sm text-red-700">{pbError.message}</p>
+                )}
               </div>
             ))}
           </div>
           <p className="mt-2 text-sm text-[#64748B] leading-relaxed">
-            Store PBs separately because short-course meters, long-course meters, and yards should not be treated as the same performance.
+            For the selected event only: enter an official race PB, not a training best. Leave blank if unknown. Courses are kept separate; no time conversion or race pace is derived.
           </p>
         </div>
 
@@ -215,7 +233,7 @@ export default function SeasonPlanner() {
           label="07 · Target meet course"
           options={COURSE_TYPES}
           value={targetCourse}
-          onChange={setTargetCourse}
+          onChange={course => { setTargetCourse(course); setGoalTime(""); setPBError(null); if (!selectedEvent?.courses.includes(course)) setMainEvent(""); }}
           testIdPrefix="season-target-course"
           columns={3}
           renderLabel={(v) => COURSE_LABELS[v]}
@@ -242,7 +260,7 @@ export default function SeasonPlanner() {
         />
 
         <TileGroup
-          label="10 · Session duration"
+          label="10 · Pool-session duration (minutes)"
           options={DURATIONS}
           value={sessionDuration}
           onChange={setSessionDuration}
@@ -309,7 +327,7 @@ export default function SeasonPlanner() {
             <InfoCard icon={Target} title="PB / course context">
               <div className="space-y-1">
                 <div>Target course: <span className="font-bold text-[#0F172A]">{plan.courseContext.targetCourseLabel}</span></div>
-                <div>Current PB used: <span className="font-bold text-[#0F172A]">{plan.courseContext.relevantPB || "Not entered"}</span></div>
+                <div>Coach-entered official race PB: <span className="font-bold text-[#0F172A]">{plan.courseContext.relevantPB || "Not entered"}</span></div>
                 <div>Goal time: <span className="font-bold text-[#0F172A]">{plan.courseContext.goalTime || "Not entered"}</span></div>
                 <div className="pt-1 text-xs text-[#64748B]">SCM, LCM and SCY are stored separately to avoid false conversions.</div>
               </div>
@@ -344,7 +362,7 @@ export default function SeasonPlanner() {
                       <h4 className="font-display text-xl font-black text-[#003366]">{week.phase}</h4>
                     </div>
                     <div className="text-right">
-                      <div className="label-eyebrow">Est. load</div>
+                      <div className="label-eyebrow">Heuristic weekly distance</div>
                       <div className="font-display font-black text-[#0F172A]">{week.estimatedWeeklyVolume}{volumeUnit}</div>
                     </div>
                   </div>
@@ -371,7 +389,7 @@ export default function SeasonPlanner() {
           </div>
 
           <div className="p-5 bg-[#F8FAFC] border-t border-[#CBD5E1] text-sm text-[#475569] leading-relaxed">
-            <span className="font-bold text-[#0F172A]">Planning note:</span> {plan.overview.evidenceNote}
+            <span className="font-bold text-[#0F172A]">Planning note:</span> {plan.volumeEstimate.note} {plan.input.legacyPBUnverified && "Legacy PB entries are unverified; re-enter the official race PB for the selected event."} {plan.overview.evidenceNote}
           </div>
         </div>
       )}

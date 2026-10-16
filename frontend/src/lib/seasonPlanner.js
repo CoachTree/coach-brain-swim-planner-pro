@@ -1,3 +1,4 @@
+import { normalizeSeasonInput } from "./seasonPlannerInput";
 
 /**
  * Rule-based modern swim season planner.
@@ -37,10 +38,12 @@ const COURSE_LABELS = {
 
 function courseContext(input = {}) {
   const targetCourse = input.targetCourse || (input.poolLength === "yards" ? "SCY" : input.poolLength === "25m" ? "SCM" : "LCM");
-  const currentPBs = input.currentPBs || {};
-  const relevantPB = currentPBs[targetCourse] || input.currentPB || "";
+  const currentPBs = input.officialPBs[input.eventId] || {};
+  const relevantPB = currentPBs[targetCourse] || "";
   return {
     targetCourse,
+    eventId: input.eventId,
+    pbSource: "coach-entered-official-race",
     targetCourseLabel: COURSE_LABELS[targetCourse] || targetCourse,
     currentPBs: {
       SCM: currentPBs.SCM || "",
@@ -49,7 +52,7 @@ function courseContext(input = {}) {
     },
     relevantPB,
     goalTime: input.goalTime || "",
-    note: "PBs are course-specific. Do not compare SCM, LCM, and SCY as the same performance without coach review or validated conversion logic.",
+    note: "Coach-entered official race PBs are event- and course-specific. Missing means unknown. No course conversion or numerical race pace is derived.",
   };
 }
 
@@ -67,15 +70,6 @@ function weeksBetween(start, end) {
   if (!start || !end) return 12;
   const ms = end.getTime() - start.getTime();
   return clamp(Math.ceil(ms / (1000 * 60 * 60 * 24 * 7)), 1, 24);
-}
-
-function eventGroup(mainEvent) {
-  const e = String(mainEvent || "").toLowerCase();
-  if (e.includes("50") || e.includes("100")) return "sprint";
-  if (e.includes("200")) return "middle";
-  if (e.includes("400") || e.includes("distance") || e.includes("800") || e.includes("1500")) return "distance";
-  if (e.includes("im")) return "im";
-  return "stroke";
 }
 
 function cycleType(weeks) {
@@ -176,13 +170,28 @@ const TARGETS = {
 function keySet(eventType, phase, weekInPhase, profile) {
   const unit = profile.poolLength === "yards" ? "yd" : "m";
   const level = profile.level;
-  const event = profile.mainEvent;
+  const event = profile.event;
+  const length = profile.poolLength === "50m" ? 50 : 25;
+  const stroke = event.stroke;
+  const leg = Math.max(length, event.distance / 4);
+  const raceModel = event.unit !== unit
+    ? `Course units differ: practise ${stroke} skills in the training pool; coach must specify the competition-distance rehearsal. No distance or time conversion applied.`
+    : stroke === "IM"
+      ? `4x${leg}${unit} in butterfly/backstroke/breaststroke/freestyle order, 30-45s rest; ${event.distance === 100 && length === 50 ? 'transition skills, not a broken 100 IM' : `broken ${event.label}, protect each transition`}`
+      : event.distance === 50
+        ? `6x15${unit} ${stroke} acceleration with full recovery; rehearse the 50 start and finish`
+        : event.distance === 100
+          ? `2x50${unit} ${stroke}, long recovery; rehearse 100 speed endurance and finish`
+          : event.distance === 200
+            ? `4x50${unit} ${stroke}, 20-30s rest; rehearse 200 distribution and controlled back half`
+            : `3x${event.distance / 3 % length === 0 ? event.distance / 3 : 100}${unit} freestyle, 30-45s rest; rehearse ${event.label} sustainable rhythm and negative split`;
+  if (phase === "raceSpecific") return raceModel;
+  if (stroke === "IM") return `${phase === "build" || phase === "intensive" ? 3 : 1} rounds: 4x${leg}${unit} in butterfly/backstroke/breaststroke/freestyle order; ${event.label} ${phase === "intensive" ? 'back-half control with recovery between rounds' : 'stroke balance and transitions; generous recovery'}. Coach adapts volume to technical quality.`;
 
   const sprintSets = {
     preparation: `8x15${unit} breakout skill, walk-back rest + 6x25${unit} smooth speed on 1:30`,
     build: `2 rounds: 4x25${unit} resisted or fins on 1:15 + 4x50${unit} easy technique`,
     intensive: `8x15${unit} max speed from push/dive on 1:30-2:00 + 4x25${unit} race tempo on 2:00`,
-    raceSpecific: `Broken ${event}: 25${unit} + 25${unit} / long rest, exact race skills and finish`,
     taper: `6x15${unit} fast breakout on 1:30 + 2x25${unit} race-feel, full recovery`,
     raceWeek: `4x15${unit} breakout + 2x25${unit} relaxed fast, stop while sharp`,
   };
@@ -191,7 +200,6 @@ function keySet(eventType, phase, weekInPhase, profile) {
     preparation: `12x50${unit} drill/swim by 25 on 1:00-1:15, hold stroke count`,
     build: `10x100${unit} threshold rhythm, descend 1-5 twice, technical cap`,
     intensive: `3 rounds: 4x50${unit} at 200 pace on 1:00 + 100${unit} easy`,
-    raceSpecific: `4x50${unit} target 200 pace with 20-30s rest + 1x100${unit} controlled finish`,
     taper: `6x50${unit}: 2 pace, 2 easy, 2 pace-feel; full technical quality`,
     raceWeek: `3x50${unit} race rhythm with generous rest + turns/finish check`,
   };
@@ -200,24 +208,14 @@ function keySet(eventType, phase, weekInPhase, profile) {
     preparation: `3x600${unit} aerobic negative split, 30s rest, count strokes last 100`,
     build: `5x300${unit} threshold with last 50 strong, 30-40s rest`,
     intensive: `12x100${unit} at threshold-plus, every 4th strong, maintain efficiency`,
-    raceSpecific: `8x100${unit} target race pace, strict rhythm, negative split final 4`,
     taper: `6x100${unit} race rhythm / easy alternation, leave the pool fresh`,
     raceWeek: `4x100${unit} light pace feel + 4x25${unit} relaxed fast`,
   };
 
-  const imSets = {
-    preparation: `12x50${unit} as 3 rounds of fly/back/breast/free drill-swim by 25`,
-    build: `8x100${unit} IM aerobic, hold weak-stroke quality, 20s rest`,
-    intensive: `4 rounds: 25${unit} fast weak stroke + 75${unit} IM pace, full control`,
-    raceSpecific: `Broken IM: 4x50${unit} in race order at target rhythm, 30-45s rest`,
-    taper: `8x25${unit} stroke rhythm in IM order, long rest, no strain`,
-    raceWeek: `1 round IM order 25${unit} each + starts/turns, finish confident`,
-  };
-
-  const map = eventType === "sprint" ? sprintSets : eventType === "middle" ? middleSets : eventType === "distance" ? distanceSets : eventType === "im" ? imSets : middleSets;
+  const map = eventType === "sprint" ? sprintSets : eventType === "middle" ? middleSets : distanceSets;
   let set = map[phase] || map.build;
   if (level === "beginner") set = set.replace(/threshold-plus|lactate tolerance/gi, "controlled aerobic");
-  return set;
+  return `${event.label}: ${set}. Main stroke: ${stroke}; coach adapts repeats and recovery to technical quality.`;
 }
 
 function technicalFocus(eventType, phase, limitation) {
@@ -271,16 +269,23 @@ function weeklyLoad(phase, baseVolume, taperIndex = 0) {
   return Math.round((baseVolume * (factors[phase] || 0.8)) / 100) * 100;
 }
 
-export function generateSeasonPlan(input = {}) {
+export function generateSeasonPlan(rawInput = {}) {
+  const input = normalizeSeasonInput(rawInput);
   const today = parseDate(input.currentDate) || new Date();
   const meet = parseDate(input.targetMeetDate);
   const weeks = weeksBetween(today, meet);
-  const eventType = eventGroup(input.mainEvent);
+  const eventType = input.event.group;
   const course = courseContext(input);
   const phases = phaseDurations(weeks, input.taperPreference, input.level);
   const sessions = Number(input.sessionsPerWeek || 5);
   const duration = Number(input.sessionDuration || 90);
   const baseVolume = clamp(sessions * duration * 35, 6000, 65000); // rough weekly swim load proxy
+  const rawVolume = sessions * duration * 35;
+  const volumeEstimate = {
+    unit: input.poolLength === "yards" ? "yd" : "m",
+    capped: rawVolume > 65000,
+    note: `Heuristic weekly distance estimate, not a physiological load measure or prescription. Uses 35 pool units/minute including rest; coach review required.${rawVolume > 65000 ? ' Base estimate capped at 65,000; additional sessions/minutes are not reflected above this cap.' : rawVolume < 6000 ? ' Base estimate floored at 6,000; this may overstate low-frequency programs.' : ''}`,
+  };
   const targetMap = TARGETS[eventType] || TARGETS.stroke;
 
   const weeksOut = [];
@@ -302,7 +307,14 @@ export function generateSeasonPlan(input = {}) {
           phase === "raceSpecific" ? "Event-specific pace, skills, and race modelling" :
           phase === "taper" ? "Fatigue reduction with speed maintenance" :
           "Freshness, confidence, and race execution",
-        technicalFocus: technicalFocus(eventType, phase, input.mainLimitation || "balanced development"),
+        technicalFocus: `${technicalFocus(eventType, phase, input.mainLimitation)} ${ {
+          freestyle: "Freestyle: breathing pattern and catch stability.",
+          backstroke: "Backstroke: body alignment, rotation and turn approach.",
+          breaststroke: "Breaststroke: pull-kick timing and legal pullouts.",
+          butterfly: "Butterfly: breath timing, undulation and sustainable rhythm.",
+          IM: "IM: legal transitions in butterfly/backstroke/breaststroke/freestyle order.",
+        }[input.event.stroke]}`,
+
         keySet: keySet(eventType, phase, i, input),
         drylandFocus: drylandFocus(phase, input.level || "competitive"),
         recoveryNote: recoveryNote(phase, weekNo, sessions),
@@ -334,6 +346,7 @@ export function generateSeasonPlan(input = {}) {
     cycleType: cycleType(weeks),
     eventType,
     courseContext: course,
+    volumeEstimate,
     overview: {
       strategy: `Build toward ${input.mainEvent || "the target event"} in ${course.targetCourseLabel} with a ${cycleType(weeks).toLowerCase()} that balances adaptation, recovery, race-specificity, and taper freshness.`,
       priorities,
@@ -354,9 +367,11 @@ export function copySeasonPlanText(plan) {
   lines.push("=".repeat(28));
   lines.push(`${plan.cycleType} · ${plan.weeks} weeks`);
   lines.push(plan.overview.strategy);
+  if (plan.volumeEstimate) lines.push(plan.volumeEstimate.note);
+  if (plan.input?.legacyPBUnverified) lines.push("Legacy PB entries are unverified; re-enter an official race PB for the selected event and course.");
   if (plan.courseContext) {
     lines.push(`Course: ${plan.courseContext.targetCourseLabel}`);
-    lines.push(`Current PB used: ${plan.courseContext.relevantPB || "Not entered"}`);
+    lines.push(`${plan.courseContext.pbSource === "coach-entered-official-race" ? "Coach-entered official race PB" : "Legacy PB (unverified)"}: ${plan.courseContext.relevantPB || "Not entered"}`);
     lines.push(`Goal time: ${plan.courseContext.goalTime || "Not entered"}`);
     lines.push(`SCM PB: ${plan.courseContext.currentPBs?.SCM || "-"} / LCM PB: ${plan.courseContext.currentPBs?.LCM || "-"} / SCY PB: ${plan.courseContext.currentPBs?.SCY || "-"}`);
   }
