@@ -21,7 +21,7 @@ test('defaults and explicit legacy events remain supported', () => {
 test.each([0,15,1.5,'',null,NaN,Infinity])('rejects session count %s', sessionsPerWeek => expect(() => normalizeSeasonInput({sessionsPerWeek})).toThrow());
 test.each([59,241,90.5,'',null,NaN])('rejects duration %s', sessionDuration => expect(() => normalizeSeasonInput({sessionDuration})).toThrow());
 test.each([1,12,14])('supports %s sessions and 210 minutes', sessionsPerWeek => expect(normalizeSeasonInput({sessionsPerWeek,sessionDuration:210}).sessionDuration).toBe(210));
-test.each([{eventId:'100-IM-m'}, {eventId:'100-freestyle-yd'}, {level:'elite'}, {age:7}, {poolLength:'30m'}, {taperPreference:'4'}, {trainingStyle:'unknown'}, {mainLimitation:'unknown'}, {currentDate:'2026-02-30'}, {targetMeetDate:'2000-01-01'}, {goalTime:'1:99'}])('rejects invalid input %j', input => expect(() => normalizeSeasonInput(input)).toThrow());
+test.each([{eventId:'100-IM-m'}, {eventId:'100-freestyle-yd'}, {level:'elite'}, {age:7}, {poolLength:'30m'}, {taperPreference:'29'}, {trainingStyle:'unknown'}, {mainLimitation:'unknown'}, {currentDate:'2026-02-30'}, {targetMeetDate:'2000-01-01'}, {goalTime:'1:99'}])('rejects invalid input %j', input => expect(() => normalizeSeasonInput(input)).toThrow());
 test('official PBs remain bound to event and course; unknown is empty', () => {
   const officialPBs = {'100-freestyle-m':{SCM:'50.12',LCM:'52.00'},'200-butterfly-m':{LCM:'2:03.45'}};
   const result = normalizeSeasonInput({officialPBs});

@@ -1,3 +1,4 @@
+import { localToday, addCalendarDays } from "@/lib/seasonCalendar";
 
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -21,7 +22,7 @@ const COURSE_LABELS = {
   SCY: "Short course yards · 25y",
 };
 const LIMITATIONS = ["speed", "endurance", "back half", "technique", "starts/turns", "race pace"];
-const TAPERS = ["auto", "1", "2", "3"];
+const TAPERS = ["auto", ...Array.from({length:29}, (_,i) => i)];
 const STYLES = [
   "balanced modern",
   "sprint focus",
@@ -32,15 +33,8 @@ const STYLES = [
   "national level preparation",
 ];
 
-function todayISO() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function defaultMeetISO() {
-  const d = new Date();
-  d.setDate(d.getDate() + 84);
-  return d.toISOString().slice(0, 10);
-}
+const todayISO = localToday;
+const defaultMeetISO = () => addCalendarDays(localToday(),84);
 
 function FieldLabel({ children }) {
   return <label className="label-eyebrow block mb-3">{children}</label>;
@@ -58,6 +52,16 @@ function InfoCard({ icon: Icon, title, children }) {
   );
 }
 
+// Serialize every submitted input, with deterministic PB course ordering and
+// equivalent missing/empty drafts. The immutable string never aliases UI drafts.
+function inputSnapshot(input) {
+  const event = COMPETITION_EVENTS.find(e => e.id === input.eventId);
+  const officialPBs = event ? { [event.id]: Object.fromEntries(
+    event.courses.map(course => [course, input.officialPBs[event.id]?.[course] ?? ""])
+  ) } : {};
+  return JSON.stringify({ ...input, officialPBs });
+}
+
 export default function SeasonPlanner() {
   const [currentDate, setCurrentDate] = useState(todayISO());
   const [targetMeetDate, setTargetMeetDate] = useState(defaultMeetISO());
@@ -73,7 +77,9 @@ export default function SeasonPlanner() {
   const [mainLimitation, setMainLimitation] = useState("race pace");
   const [taperPreference, setTaperPreference] = useState("auto");
   const [trainingStyle, setTrainingStyle] = useState("balanced modern");
-  const [plan, setPlan] = useState(null);
+  // Keep a successful result and its immutable input snapshot together. Failed
+  // attempts must leave both intact so the old result remains reference-only.
+  const [generatedResult, setGeneratedResult] = useState(null);
   const [pbError, setPBError] = useState(null);
 
   const input = useMemo(
@@ -112,11 +118,15 @@ export default function SeasonPlanner() {
     ],
   );
 
+  const currentSnapshot = inputSnapshot(input);
+  const plan = generatedResult?.plan;
+  const isStale = !!generatedResult && currentSnapshot !== generatedResult.inputSnapshot;
+
   const handleGenerate = () => {
     setPBError(null);
     try {
       const result = generateSeasonPlan(input);
-      setPlan(result);
+      setGeneratedResult({ plan: result, inputSnapshot: currentSnapshot });
       toast.success("Season plan ready");
       setTimeout(() => {
         document.getElementById("season-plan-result")?.scrollIntoView({
@@ -131,9 +141,9 @@ export default function SeasonPlanner() {
   };
 
   const handleCopy = async () => {
-    if (!plan) return;
+    if (!generatedResult || inputSnapshot(input) !== generatedResult.inputSnapshot) return;
     try {
-      await navigator.clipboard.writeText(copySeasonPlanText(plan));
+      await navigator.clipboard.writeText(copySeasonPlanText(generatedResult.plan));
       toast.success("Season plan copied");
     } catch {
       toast.error("Could not copy season plan");
@@ -163,7 +173,7 @@ export default function SeasonPlanner() {
         <p className="text-sm">Session duration is elapsed pool time including in-water rest, excluding separate dryland. Supported range: 60–240 minutes; 1–14 sessions per week.</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <FieldLabel>01 · Current date</FieldLabel>
+            <FieldLabel>01 · Season start date</FieldLabel>
             <Input
               type="date"
               value={currentDate}
@@ -280,7 +290,7 @@ export default function SeasonPlanner() {
           onChange={setTaperPreference}
           testIdPrefix="season-taper"
           columns={4}
-          renderLabel={(v) => (v === "auto" ? "Auto" : `${v} week${v === "1" ? "" : "s"}`)}
+          renderLabel={(v) => (v === "auto" ? "Auto" : `${v} calendar day${v === 1 ? "" : "s"}`)}
         />
 
         <TileGroup label="14 · Training style" options={STYLES} value={trainingStyle} onChange={setTrainingStyle} testIdPrefix="season-style" columns={2} />
@@ -296,16 +306,22 @@ export default function SeasonPlanner() {
       </section>
 
       {plan && (
-        <div id="season-plan-result" className="mt-14 border border-[#CBD5E1] rounded-sm overflow-hidden">
+        <div id="season-plan-result" aria-describedby={isStale ? "season-stale-status" : undefined} className="mt-14 border border-[#CBD5E1] rounded-sm overflow-hidden">
           <div className="bg-[#003366] text-white p-6">
+            <p id="season-stale-status" role="status" aria-live="polite" aria-atomic="true" className={isStale ? "mb-4 font-bold" : undefined}>
+              {isStale && "Settings changed — Regenerate required. Previous result shown for reference; copying is disabled."}
+            </p>
             <div className="label-eyebrow text-white/70 mb-2">Cycle overview</div>
             <h3 className="font-display text-3xl sm:text-4xl font-black tracking-tight">
-              {plan.weeks} weeks · {plan.cycleType}
+              {plan.weeks} training blocks · {plan.cycleType}
             </h3>
             <p className="mt-3 text-white/80 leading-relaxed">{plan.overview.strategy}</p>
+            <p>Training: {plan.calendar.trainingStart} – {plan.calendar.trainingEnd}. Meet: {plan.calendar.meetDate} (separate milestone).</p>
             <div className="mt-5">
               <Button
                 onClick={handleCopy}
+                disabled={isStale}
+                aria-describedby={isStale ? "season-stale-status" : undefined}
                 className="rounded-sm bg-[#00E5FF] hover:bg-[#22D3EE] text-[#003366] font-display font-bold"
               >
                 <Copy className="h-4 w-4 mr-2" /> Copy plan
@@ -359,14 +375,17 @@ export default function SeasonPlanner() {
                   <div className="flex items-start justify-between gap-3 mb-3">
                     <div>
                       <div className="label-eyebrow">Week {week.week}</div>
+                      <p>{week.startDate} – {week.endDate} ({week.dayCount} days){week.partial ? ' · Partial week' : ''}</p>
+                      <p>Taper: {week.taperDays} days{week.partialTaper ? ' · Partial-week taper' : ''}. Race Week overlap: {week.raceWeekDays} days.</p>
                       <h4 className="font-display text-xl font-black text-[#003366]">{week.phase}</h4>
                     </div>
                     <div className="text-right">
                       <div className="label-eyebrow">Heuristic weekly distance</div>
-                      <div className="font-display font-black text-[#0F172A]">{week.estimatedWeeklyVolume}{volumeUnit}</div>
+                      <div className="font-display font-black text-[#0F172A]">{week.estimatedWeeklyVolume === null ? "Not estimated" : `${week.estimatedWeeklyVolume}${volumeUnit}`}</div>
                     </div>
                   </div>
 
+                  <p className="text-sm">{week.volumeNote}</p>
                   <div className="grid grid-cols-1 gap-3 text-sm leading-relaxed">
                     <div><span className="font-bold text-[#0F172A]">Goal:</span> {week.weeklyGoal}</div>
                     <div><span className="font-bold text-[#0F172A]">Physiology:</span> {week.physiologicalTarget}</div>

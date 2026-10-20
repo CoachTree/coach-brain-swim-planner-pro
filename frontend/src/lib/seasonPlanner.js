@@ -1,3 +1,4 @@
+import { seasonCalendar, dateOrdinal } from "./seasonCalendar";
 import { normalizeSeasonInput } from "./seasonPlannerInput";
 
 /**
@@ -60,68 +61,12 @@ function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
 }
 
-function parseDate(value) {
-  if (!value) return null;
-  const d = new Date(`${value}T00:00:00`);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-
-function weeksBetween(start, end) {
-  if (!start || !end) return 12;
-  const ms = end.getTime() - start.getTime();
-  return clamp(Math.ceil(ms / (1000 * 60 * 60 * 24 * 7)), 1, 24);
-}
-
 function cycleType(weeks) {
   if (weeks <= 4) return "Mini Peak Plan";
   if (weeks <= 8) return "Short Cycle";
   if (weeks <= 12) return "Standard Cycle";
   if (weeks <= 18) return "Extended Build Cycle";
   return "Full Season Cycle";
-}
-
-function taperWeeks(weeks, pref, level) {
-  if (pref && pref !== "auto") return Number(pref);
-  if (weeks <= 4) return 0;
-  if (weeks <= 8) return 1;
-  if (weeks <= 12) return level === "national" ? 2 : 1;
-  if (weeks <= 18) return 2;
-  return 3;
-}
-
-function phaseDurations(totalWeeks, taperPref, level) {
-  const raceWeek = 1;
-  const taper = clamp(taperWeeks(totalWeeks, taperPref, level), 0, Math.max(0, totalWeeks - 2));
-  const remaining = Math.max(0, totalWeeks - raceWeek - taper);
-
-  if (totalWeeks <= 4) {
-    return [
-      ["build", Math.max(1, totalWeeks - 2)],
-      ["taper", totalWeeks >= 3 ? 1 : 0],
-      ["raceWeek", 1],
-    ].filter(([, n]) => n > 0);
-  }
-
-  if (totalWeeks <= 8) {
-    const build = Math.max(1, Math.round(remaining * 0.45));
-    const intensive = Math.max(1, Math.round(remaining * 0.30));
-    const raceSpecific = Math.max(1, remaining - build - intensive);
-    return [["build", build], ["intensive", intensive], ["raceSpecific", raceSpecific], ["taper", taper], ["raceWeek", 1]].filter(([, n]) => n > 0);
-  }
-
-  if (totalWeeks <= 12) {
-    const preparation = Math.max(1, Math.round(remaining * 0.20));
-    const build = Math.max(2, Math.round(remaining * 0.35));
-    const intensive = Math.max(2, Math.round(remaining * 0.25));
-    const raceSpecific = Math.max(1, remaining - preparation - build - intensive);
-    return [["preparation", preparation], ["build", build], ["intensive", intensive], ["raceSpecific", raceSpecific], ["taper", taper], ["raceWeek", 1]].filter(([, n]) => n > 0);
-  }
-
-  const preparation = Math.max(2, Math.round(remaining * 0.22));
-  const build = Math.max(3, Math.round(remaining * 0.34));
-  const intensive = Math.max(3, Math.round(remaining * 0.24));
-  const raceSpecific = Math.max(2, remaining - preparation - build - intensive);
-  return [["preparation", preparation], ["build", build], ["intensive", intensive], ["raceSpecific", raceSpecific], ["taper", taper], ["raceWeek", 1]].filter(([, n]) => n > 0);
 }
 
 const TARGETS = {
@@ -271,12 +216,10 @@ function weeklyLoad(phase, baseVolume, taperIndex = 0) {
 
 export function generateSeasonPlan(rawInput = {}) {
   const input = normalizeSeasonInput(rawInput);
-  const today = parseDate(input.currentDate) || new Date();
-  const meet = parseDate(input.targetMeetDate);
-  const weeks = weeksBetween(today, meet);
+  const calendar = seasonCalendar(input);
+  const weeks = calendar.weeks;
   const eventType = input.event.group;
   const course = courseContext(input);
-  const phases = phaseDurations(weeks, input.taperPreference, input.level);
   const sessions = Number(input.sessionsPerWeek || 5);
   const duration = Number(input.sessionDuration || 90);
   const baseVolume = clamp(sessions * duration * 35, 6000, 65000); // rough weekly swim load proxy
@@ -286,51 +229,25 @@ export function generateSeasonPlan(rawInput = {}) {
     capped: rawVolume > 65000,
     note: `Heuristic weekly distance estimate, not a physiological load measure or prescription. Uses 35 pool units/minute including rest; coach review required.${rawVolume > 65000 ? ' Base estimate capped at 65,000; additional sessions/minutes are not reflected above this cap.' : rawVolume < 6000 ? ' Base estimate floored at 6,000; this may overstate low-frequency programs.' : ''}`,
   };
-  const targetMap = TARGETS[eventType] || TARGETS.stroke;
 
-  const weeksOut = [];
-  let weekNo = 1;
-  const phasePlan = [];
-  phases.forEach(([phase, count]) => {
-    const start = weekNo;
-    let taperIndex = 0;
-    for (let i = 1; i <= count; i += 1) {
-      const weekly = {
-        week: weekNo,
-        phase: PHASE_LABELS[phase],
-        phaseKey: phase,
-        weeklyGoal: targetMap[phase],
-        physiologicalTarget:
-          phase === "preparation" ? "Aerobic base + skill acquisition" :
-          phase === "build" ? "Threshold / aerobic power development" :
-          phase === "intensive" ? "High-intensity adaptation: VO2, lactate tolerance, race pace" :
-          phase === "raceSpecific" ? "Event-specific pace, skills, and race modelling" :
-          phase === "taper" ? "Fatigue reduction with speed maintenance" :
-          "Freshness, confidence, and race execution",
-        technicalFocus: `${technicalFocus(eventType, phase, input.mainLimitation)} ${ {
-          freestyle: "Freestyle: breathing pattern and catch stability.",
-          backstroke: "Backstroke: body alignment, rotation and turn approach.",
-          breaststroke: "Breaststroke: pull-kick timing and legal pullouts.",
-          butterfly: "Butterfly: breath timing, undulation and sustainable rhythm.",
-          IM: "IM: legal transitions in butterfly/backstroke/breaststroke/freestyle order.",
-        }[input.event.stroke]}`,
-
-        keySet: keySet(eventType, phase, i, input),
-        drylandFocus: drylandFocus(phase, input.level || "competitive"),
-        recoveryNote: recoveryNote(phase, weekNo, sessions),
-        estimatedWeeklyVolume: weeklyLoad(phase, baseVolume, taperIndex),
-      };
-      weeksOut.push(weekly);
-      if (phase === "taper") taperIndex += 1;
-      weekNo += 1;
-    }
-    phasePlan.push({
-      phase: PHASE_LABELS[phase],
-      phaseKey: phase,
-      weeks: count,
-      range: count === 1 ? `Week ${start}` : `Week ${start}-${weekNo - 1}`,
-      purpose: PHASE_DESCRIPTIONS[phase],
-    });
+  const phasePlan = calendar.phasePlan.map(p => ({...p, phase:PHASE_LABELS[p.phaseKey], range:`${p.startDate} – ${p.endDate} (${p.dayCount} days)`, purpose:PHASE_DESCRIPTIONS[p.phaseKey]}));
+  const weeksOut = calendar.blocks.map(block => {
+    const keys = block.phases.map(p => p.phaseKey);
+    const describe = fn => block.phases.map(p => `${PHASE_LABELS[p.phaseKey]} (${p.startDate} – ${p.endDate}): ${fn(p.phaseKey)}`).join(' | ');
+    return {
+      ...block,
+      phaseKey: keys.length === 1 ? keys[0] : 'mixed',
+      phase: keys.map(k => PHASE_LABELS[k]).join(' / '),
+      weeklyGoal: describe(k => TARGETS[eventType][k]),
+      physiologicalTarget: describe(k => ({preparation:'Aerobic base + skill acquisition',build:'Threshold / aerobic power development',intensive:'High-intensity adaptation: VO2, lactate tolerance, race pace',raceSpecific:'Event-specific pace, skills, and race modelling',taper:'Fatigue reduction with speed maintenance'}[k])),
+      technicalFocus: describe(k => technicalFocus(eventType,k,input.mainLimitation) + ' ' + ({freestyle:'Freestyle: breathing pattern and catch stability.',backstroke:'Backstroke: body alignment, rotation and turn approach.',breaststroke:'Breaststroke: pull-kick timing and legal pullouts.',butterfly:'Butterfly: breath timing, undulation and sustainable rhythm.',IM:'IM: legal transitions in butterfly/backstroke/breaststroke/freestyle order.'}[input.event.stroke])),
+      keySet: describe(k => keySet(eventType,k,block.week,input)),
+      drylandFocus: describe(k => drylandFocus(k,input.level)),
+      recoveryNote: describe(k => recoveryNote(k,block.week,sessions)),
+      // A partial/mixed block has no inferred daily allocation or prorated volume.
+      estimatedWeeklyVolume: !block.partial && keys.length === 1 ? weeklyLoad(keys[0],baseVolume, keys[0] === 'taper' ? Math.floor((dateOrdinal(block.startDate)-dateOrdinal(calendar.taper.startDate))/7) : 0) : null,
+      volumeNote: block.partial || keys.length > 1 ? 'No block distance estimate for partial or mixed-phase blocks; no daily allocation or proration inferred.' : 'Full seven-day heuristic estimate, not a prescription.',
+    };
   });
 
   const priorities = {
@@ -343,6 +260,7 @@ export function generateSeasonPlan(rawInput = {}) {
 
   return {
     weeks,
+    calendar,
     cycleType: cycleType(weeks),
     eventType,
     courseContext: course,
@@ -351,7 +269,7 @@ export function generateSeasonPlan(rawInput = {}) {
       strategy: `Build toward ${input.mainEvent || "the target event"} in ${course.targetCourseLabel} with a ${cycleType(weeks).toLowerCase()} that balances adaptation, recovery, race-specificity, and taper freshness.`,
       priorities,
       peakStrategy:
-        "Progress from general capacity to race-specific quality. Protect the final 7-21 days for fatigue reduction while preserving speed stimulus.",
+        `Taper: ${calendar.taper ? `${calendar.taper.startDate} – ${calendar.taper.endDate} (${calendar.taperDays} days)` : "none (0 days)"}. Race Week annotation: ${calendar.raceWeek.startDate} – ${calendar.raceWeek.endDate}. Meet milestone: ${calendar.meetDate}. ${calendar.autoAdjustment || ""} ${calendar.allocationNote || ""}`,
       evidenceNote:
         "Evidence-informed logic: periodized load progression, event specificity, high-quality speed with long rest, and taper volume reduction while maintaining intensity.",
     },
@@ -367,6 +285,10 @@ export function copySeasonPlanText(plan) {
   lines.push("=".repeat(28));
   lines.push(`${plan.cycleType} · ${plan.weeks} weeks`);
   lines.push(plan.overview.strategy);
+  if (plan.calendar) {
+    lines.push(`Training: ${plan.calendar.trainingStart} – ${plan.calendar.trainingEnd}`);
+    lines.push(plan.overview.peakStrategy);
+  }
   if (plan.volumeEstimate) lines.push(plan.volumeEstimate.note);
   if (plan.input?.legacyPBUnverified) lines.push("Legacy PB entries are unverified; re-enter an official race PB for the selected event and course.");
   if (plan.courseContext) {
@@ -385,6 +307,11 @@ export function copySeasonPlanText(plan) {
   lines.push("WEEKLY PLAN");
   plan.weeklyPlan.forEach((w) => {
     lines.push(`Week ${w.week} · ${w.phase}`);
+    if (w.startDate) {
+      lines.push(`${w.startDate} – ${w.endDate} (${w.dayCount} days)${w.partial ? ' · Partial week' : ''}`);
+      lines.push(`Taper: ${w.taperDays} days${w.partialTaper ? ' · Partial-week taper' : ''}; Race Week overlap: ${w.raceWeekDays} days`);
+      lines.push(`Heuristic weekly distance: ${w.estimatedWeeklyVolume === null ? 'Not estimated' : `${w.estimatedWeeklyVolume}${plan.volumeEstimate.unit}`}. ${w.volumeNote}`);
+    }
     lines.push(`Goal: ${w.weeklyGoal}`);
     lines.push(`Target: ${w.physiologicalTarget}`);
     lines.push(`Technical: ${w.technicalFocus}`);

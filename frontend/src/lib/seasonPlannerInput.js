@@ -1,3 +1,4 @@
+import { localToday, addCalendarDays, seasonCalendar } from "./seasonCalendar";
 import { parsePerformanceTime } from "./performanceTime";
 
 // Competition distances: USMS Events 101. Meet/age eligibility remains coach-reviewed.
@@ -44,8 +45,8 @@ export function normalizeSeasonInput(raw = {}) {
   const eventId = raw.eventId === undefined ? (raw.mainEvent === undefined ? `100-freestyle-${unit}` : aliases[raw.mainEvent]) : raw.eventId;
   const event = COMPETITION_EVENTS.find(e => e.id === eventId);
   if (!event || !event.courses.includes(targetCourse)) throw new Error('Select one valid distance and stroke for the competition course.');
-  const currentDate = date(raw.currentDate, new Date().toISOString().slice(0,10), 'current date');
-  const targetMeetDate = date(raw.targetMeetDate, new Date(Date.parse(currentDate) + 84 * 86400000).toISOString().slice(0,10), 'meet date');
+  const currentDate = date(raw.currentDate, localToday(), 'current date');
+  const targetMeetDate = date(raw.targetMeetDate, addCalendarDays(currentDate, 84), 'meet date');
   if (targetMeetDate <= currentDate) throw new Error('Meet date must be after the current date.');
   const officialPBs = {};
   if (raw.officialPBs !== undefined && (!raw.officialPBs || typeof raw.officialPBs !== 'object' || Array.isArray(raw.officialPBs))) throw new Error('Invalid official PB entries.');
@@ -63,7 +64,7 @@ export function normalizeSeasonInput(raw = {}) {
       }
     });
   });
-  return {
+  const normalized = {
     currentDate, targetMeetDate, poolLength, targetCourse, eventId, event, mainEvent: event.label, officialPBs,
     // Historical unbound PB fields never become official PBs automatically.
     legacyPBUnverified: Boolean(raw.currentPB || Object.values(raw.currentPBs || {}).some(Boolean)),
@@ -73,7 +74,9 @@ export function normalizeSeasonInput(raw = {}) {
     sessionDuration: integer(raw.sessionDuration,90,60,240,'Pool-session minutes'),
     level: choice(raw.level,'competitive',['beginner','intermediate','competitive','national'],'level'),
     mainLimitation: choice(raw.mainLimitation,'race pace',['speed','endurance','back half','technique','starts/turns','race pace'],'limitation'),
-    taperPreference: choice(raw.taperPreference,'auto',['auto','1','2','3'],'taper preference'),
+    taperPreference: raw.taperPreference === undefined || raw.taperPreference === 'auto' ? 'auto' : integer(raw.taperPreference,0,0,28,'Taper days'),
     trainingStyle: choice(raw.trainingStyle,'balanced modern',['balanced modern','sprint focus','endurance focus','race pace focus','technique rebuild','junior development','national level preparation'],'training style'),
   };
+  seasonCalendar(normalized);
+  return normalized;
 }
