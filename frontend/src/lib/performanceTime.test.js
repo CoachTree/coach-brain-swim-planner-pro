@@ -40,3 +40,10 @@ test.each([["0:59.9", "0:59.9"], ["2:00", "2:00"], ["10:00.00", "10:00.00"], ["0
   expect(formatPerformanceTime(parsePerformanceTime(input).value)).toBe(output);
 });
 test.each(["-1:07", "1:-07", "1:60.0", "1:7:2", "abc", "1.2.3"])("review malformed time %s", input => expect(parsePerformanceTime(input).ok).toBe(false));
+
+// Only leading/trailing whitespace is trimmed; internal tabs/newlines stay invalid.
+test.each([
+  "1\t:07", "1:\t07", "1:07\t.2", "1:07.\t2", "6\t7", "67\n.2", "1\n:07", "1:07\n.20", "1:0\n7", "67\r\n.2",
+])("rejects internal tab/newline in time %j", input => {
+  expect(parsePerformanceTime(input)).toEqual({ ok: false, value: null, error: "invalid_time" });
+});
