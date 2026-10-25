@@ -61,9 +61,8 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
-      - name: Install locked dependencies without production credentials
-        working-directory: frontend
-        run: npm ci --legacy-peer-deps --no-audit --no-fund
+      # Generation only reads/edits source; installing here mutates tracked yarn.lock.
+      # Dependencies are installed exclusively on the isolated verification runner.
       - name: Preserve the collector from the approved base
         run: cp scripts/automation/bundle.mjs "$RUNNER_TEMP/collect-bundle.mjs"
       - name: Implement the approved task without executing candidate code
