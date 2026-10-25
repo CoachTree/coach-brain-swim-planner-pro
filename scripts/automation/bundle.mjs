@@ -152,6 +152,15 @@ function git(root, args) {
   });
 }
 
+function diagnosticPath(filename) {
+  // Bound before escaping (at most 1094 ASCII bytes, including quotes/marker).
+  // Neutralize terminal controls and both modern and legacy Actions commands.
+  const limit = 180;
+  const quoted = JSON.stringify(filename.slice(0, limit))
+    .replace(/[:#%\u007f-\uffff]/g, character => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`);
+  return quoted + (filename.length > limit ? ' [truncated]' : '');
+}
+
 export async function collectBundle({ root = process.cwd(), expected } = {}) {
   expectedSha(expected);
   // Compare against the workflow commit, including any commits Claude made locally.
@@ -171,7 +180,7 @@ export async function collectBundle({ root = process.cwd(), expected } = {}) {
   assert(changed.size > 0 && changed.size <= MAX_FILES, `collect requires 1 to ${MAX_FILES} changed files`);
   const files = [];
   for (const filename of [...changed].sort()) {
-    assert(allowedPath(filename), 'changed file is outside the automation allowlist');
+    assert(allowedPath(filename), `changed file is outside the automation allowlist: ${diagnosticPath(filename)}`);
     const destination = await inspectDestination(root, filename);
     const bytes = await readRegularFile(destination, MAX_CONTENT_BYTES);
     let content;
