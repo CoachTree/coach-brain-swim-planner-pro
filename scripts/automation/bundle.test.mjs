@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   MAX_CONTENT_BYTES, MAX_BUNDLE_BYTES, allowedPath, validateBundle, parseBundle,
   readBundle, applyBundle, collectBundle, validateBaseTree, publishBundle,
@@ -169,6 +170,79 @@ test('collect refuses unrelated, deleted, renamed, executable, symlink and inval
       await assert.rejects(collectBundle({ root, expected }));
     });
   }
+});
+
+test('collect names forbidden tracked, staged, committed and untracked paths without content', async t => {
+  for (const scenario of ['tracked', 'staged', 'committed', 'untracked']) {
+    await t.test(scenario, async child => {
+      const { root, expected: original } = await repository(child);
+      const forbidden = 'z-forbidden.txt';
+      let expected = original;
+      if (scenario === 'tracked') {
+        await fs.writeFile(path.join(root, forbidden), 'original\n');
+        git(root, ['add', forbidden]);
+        git(root, ['commit', '-m', 'tracked fixture']);
+        expected = git(root, ['rev-parse', 'HEAD']);
+      }
+      await fs.writeFile(path.join(root, 'frontend/src/lib/performanceTime.test.js'), 'test("small allowed test", () => {});\n');
+      await fs.writeFile(path.join(root, forbidden), 'FILE_CONTENT_MUST_NOT_APPEAR\n');
+      if (scenario === 'staged' || scenario === 'committed') git(root, ['add', forbidden]);
+      if (scenario === 'committed') git(root, ['commit', '-m', 'forbidden fixture']);
+      await assert.rejects(collectBundle({ root, expected }), {
+        message: 'changed file is outside the automation allowlist: "z-forbidden.txt"',
+      });
+    });
+  }
+});
+
+test('collect CLI escapes hostile pathnames, bounds output and creates no rejected artifact', async t => {
+  const cases = [
+    ['controls', 'bad\n::error::x\r\t\x1b[31m\x7f\x85\u2028\u2029\u202e.txt',
+      '"bad\\n\\u003a\\u003aerror\\u003a\\u003ax\\r\\t\\u001b[31m\\u007f\\u0085\\u2028\\u2029\\u202e.txt"'],
+    ['commands', '::error::x##[error]%0A.txt',
+      '"\\u003a\\u003aerror\\u003a\\u003ax\\u0023\\u0023[error]\\u00250A.txt"'],
+    ['quotes', 'quote"back\\slash.txt', '"quote\\"back\\\\slash.txt"'],
+    ['long path', `${'\u202e'.repeat(60)}/${'\u202e'.repeat(60)}/${'\u202e'.repeat(60)}/tail.txt`,
+      `"${'\\u202e'.repeat(60)}/${'\\u202e'.repeat(60)}/${'\\u202e'.repeat(58)}" [truncated]`],
+  ];
+  for (const [label, filename, escaped] of cases) {
+    await t.test(label, async child => {
+      const { root, expected } = await repository(child);
+      const destination = path.join(root, filename);
+      await fs.mkdir(path.dirname(destination), { recursive: true });
+      await fs.writeFile(destination, 'FILE_CONTENT_MUST_NOT_APPEAR\n');
+      const output = path.join(root, 'candidate.json');
+      const result = spawnSync(process.execPath, [fileURLToPath(new URL('./bundle.mjs', import.meta.url)), 'collect', output], {
+        cwd: root, encoding: 'utf8', env: { ...process.env, EXPECTED_BASE_SHA: expected },
+      });
+      assert.ifError(result.error);
+      assert.equal(result.status, 1);
+      assert.equal(result.stdout, '');
+      assert.equal(result.stderr, `Automation stopped: changed file is outside the automation allowlist: ${escaped}\n`);
+      assert.match(result.stderr, /^[\x20-\x7e]+\n$/);
+      assert.doesNotMatch(result.stderr, /::|##\[|%|FILE_CONTENT_MUST_NOT_APPEAR/);
+      assert.ok(Buffer.byteLength(result.stderr) < 1200);
+      await assert.rejects(fs.stat(output), { code: 'ENOENT' });
+    });
+  }
+});
+
+test('collect accepts the intended test path and still excludes ignored untracked files', async t => {
+  const { root, expected: original } = await repository(t);
+  await fs.writeFile(path.join(root, '.gitignore'), 'frontend/node_modules/\n');
+  git(root, ['add', '.gitignore']);
+  git(root, ['commit', '-m', 'ignore fixture dependencies']);
+  const expected = git(root, ['rev-parse', 'HEAD']);
+  const filename = 'frontend/src/lib/performanceTime.test.js';
+  const content = 'test("small allowed test", () => {});\n';
+  await fs.mkdir(path.join(root, 'frontend/node_modules'), { recursive: true });
+  await fs.writeFile(path.join(root, 'frontend/node_modules/ignored.txt'), 'ignored fixture\n');
+  await fs.writeFile(path.join(root, filename), content);
+  assert.deepEqual(await collectBundle({ root, expected }), { baseSha: expected, files: [{ path: filename, content }] });
+  // An unignored change to the ignore rules remains forbidden.
+  await assert.rejects(collectBundle({ root, expected: original }), {
+    message: 'changed file is outside the automation allowlist: ".gitignore"',
+  });
 });
 
 function baseTree() {
