@@ -129,7 +129,9 @@ to authenticated
 using ((select auth.uid()) = user_id)
 with check ((select auth.uid()) = user_id);
 
--- Initial Founding Coach activation: run this for each verified buyer.
+-- Legacy PAID Pro activation: run only for an approved, verified buyer.
+-- The complimentary 90-day Founding Coach Program MUST NOT use coach_access.
+-- See docs/founding-coach-program.md and the separate reviewed migration.
 -- Replace buyer@example.com with their Gumroad purchase email.
 -- insert into public.coach_access (user_id, plan, status)
 -- select id, 'pro', 'active' from auth.users where email = 'buyer@example.com'

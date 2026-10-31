@@ -1,3 +1,3 @@
 export function selectFavouriteStore(access, localStore, cloudStore) {
-  return access.isPro && access.user ? cloudStore : localStore;
+  return access.user ? cloudStore : localStore;
 }
