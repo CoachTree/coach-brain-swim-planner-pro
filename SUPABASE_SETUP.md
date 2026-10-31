@@ -22,7 +22,7 @@ In the GitHub repository, open **Settings → Secrets and variables → Actions*
 
 After the workflow update is pushed, GitHub Pages builds the site with these values. The publishable key is designed for browser use; Supabase Row Level Security in `schema.sql` ensures a signed-in coach can read only their own entitlement.
 
-## 3. First 25 Founding Coaches
+## 3. First 25 paid Founding Coaches (legacy offer)
 
 Until automated Gumroad webhooks are added, use a careful manual activation step:
 
@@ -31,3 +31,7 @@ Until automated Gumroad webhooks are added, use a careful manual activation step
 3. You verify the Gumroad sale, then run the activation query at the end of `supabase/schema.sql` in Supabase SQL Editor.
 
 This is intentional for launch: it keeps payment secrets off the public site and gives you a clear opportunity to verify the first 25 buyers. The next technical milestone is a server-side Gumroad webhook that automates this activation.
+
+## 4. Complimentary Founding Coach Program
+
+The separate 90-day invitation program is documented in [founding-coach-program.md](docs/founding-coach-program.md). Its migration is review-only until explicit production approval. Do not grant a complimentary invitation by setting `coach_access.plan = 'pro'`: that table continues to represent existing purchased/manual Pro access, without a trial expiry. The invitation migration does not implement or change Gumroad checkout, pricing, discounts, or paid activation.

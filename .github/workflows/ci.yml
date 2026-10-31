@@ -56,3 +56,21 @@ jobs:
           node-version: '22'
       - name: Test automation boundaries
         run: node --test scripts/automation/*.test.mjs
+
+  database-security:
+    name: Isolated database security tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: supabase/tests/package-lock.json
+      - name: Install isolated PostgreSQL test runtime
+        run: npm --prefix supabase/tests ci --ignore-scripts --no-audit --no-fund
+      - name: Verify grants, RLS, expiry, and paid access with synthetic users
+        run: node --test supabase/tests/*.test.mjs

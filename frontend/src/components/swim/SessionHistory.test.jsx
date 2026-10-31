@@ -50,7 +50,7 @@ test("local Save button → History → Delete immediately removes the row witho
 
 test.each([
   ["guest", { isPro: false, user: null }, false],
-  ["Free signed in", { isPro: false, user: { id: "user-1" } }, false],
+  ["Free signed in", { isPro: false, user: { id: "user-1" } }, true],
   ["Pro without login", { isPro: true, user: null }, false],
   ["Pro signed in", { isPro: true, user: { id: "user-1" } }, true],
 ])("%s uses the expected store for Save and History", async (_, access, usesCloud) => {

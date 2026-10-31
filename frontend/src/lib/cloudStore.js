@@ -23,12 +23,19 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-async function getUserId() {
+function assertScope(scope) {
+  if (scope?.isActive && !scope.isActive()) throw new Error("Account access changed. Please try again after access is verified.");
+}
+
+async function getUserId(scope) {
+  assertScope(scope);
   if (!supabase) throw new Error("Supabase is not configured.");
 
   const { data, error } = await supabase.auth.getUser();
   if (error) throw error;
   if (!data.user) throw new Error("You must be signed in to use cloud storage.");
+  assertScope(scope);
+  if (scope?.userId && data.user.id !== scope.userId) throw new Error("Account changed. Please reopen this screen.");
   return data.user.id;
 }
 
@@ -53,8 +60,16 @@ function recordToData(record, userId, createdAt, updatedAt) {
 
 function makeCollection(table) {
   return {
-    async list() {
-      const userId = await getUserId();
+    // Bind the caller's identity, so an old callback can never adopt a new login.
+    forUser(userId, isActive = () => true) {
+      if (!userId) throw new Error("An account is required for cloud storage.");
+      const scope = { userId, isActive };
+      return Object.fromEntries(["list", "get", "upsert", "remove", "clear"].map(method =>
+        [method, (...args) => this[method](...args, scope)]));
+    },
+
+    async list(scope) {
+      const userId = await getUserId(scope);
       const { data, error } = await supabase
         .from(table)
         .select("id, user_id, data, created_at, updated_at")
@@ -62,11 +77,12 @@ function makeCollection(table) {
         .order("updated_at", { ascending: false });
 
       if (error) throw error;
+      assertScope(scope);
       return (data || []).map(rowToRecord);
     },
 
-    async get(id) {
-      const userId = await getUserId();
+    async get(id, scope) {
+      const userId = await getUserId(scope);
       const { data, error } = await supabase
         .from(table)
         .select("id, user_id, data, created_at, updated_at")
@@ -75,12 +91,17 @@ function makeCollection(table) {
         .maybeSingle();
 
       if (error) throw error;
+      assertScope(scope);
       return data ? rowToRecord(data) : null;
     },
 
-    async upsert(entry) {
-      const userId = await getUserId();
-      const existing = entry.id ? await this.get(entry.id) : null;
+    async upsert(entry, scope) {
+      const userId = await getUserId(scope);
+      if (entry.user_id && entry.user_id !== userId) throw new Error("This record belongs to another account.");
+      const operationScope = { ...scope, userId };
+      const existing = entry.id ? await this.get(entry.id, operationScope) : null;
+      // A lookup or prompt must not allow a pending write to cross an auth boundary.
+      await getUserId(operationScope);
       const createdAt = existing?.created_at || entry.created_at || nowIso();
       const updatedAt = nowIso();
       const id = entry.id || uuid();
@@ -107,29 +128,33 @@ function makeCollection(table) {
         .single();
 
       if (error) throw error;
+      assertScope(scope);
       return rowToRecord(data);
     },
 
-    async remove(id) {
-      const userId = await getUserId();
-      const { error } = await supabase
+    async remove(id, scope) {
+      const userId = await getUserId(scope);
+      const { data, error } = await supabase
         .from(table)
         .delete()
         .eq("id", id)
-        .eq("user_id", userId);
+        .eq("user_id", userId)
+        .select("id");
 
       if (error) throw error;
-      return true;
+      assertScope(scope);
+      return (data || []).some(row => row.id === id);
     },
 
-    async clear() {
-      const userId = await getUserId();
+    async clear(scope) {
+      const userId = await getUserId(scope);
       const { error } = await supabase
         .from(table)
         .delete()
         .eq("user_id", userId);
 
       if (error) throw error;
+      assertScope(scope);
     },
   };
 }
