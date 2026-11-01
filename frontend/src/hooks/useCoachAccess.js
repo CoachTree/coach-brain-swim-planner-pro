@@ -1,98 +1,25 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabaseClient";
-
-const isLocalDeveloper = false;
-
-const initialState = isLocalDeveloper
-  ? {
-      configured: true,
-      loading: false,
-      user: {
-        id: "local-developer",
-        email: "developer@localhost",
-      },
-      plan: "pro",
-      isPro: true,
-      error: null,
-    }
-  : {
-      configured: isSupabaseConfigured,
-      loading: isSupabaseConfigured,
-      user: null,
-      plan: "free",
-      isPro: false,
-      error: null,
-    };
+import { createCoachAccessController, emptyCoachAccess } from "./coachAccessController";
 
 export function useCoachAccess() {
-  const [access, setAccess] = useState(initialState);
-
-  const refresh = useCallback(async () => {
-      if (isLocalDeveloper) {
-    setAccess(initialState);
-    return;
-  }
-    if (!supabase) {
-      setAccess({ ...initialState, loading: false });
-      return;
-    }
-
-    setAccess((current) => ({ ...current, loading: true, error: null }));
-    const { data: userData, error: userError } = await supabase.auth.getUser();
-
-    if (userError || !userData.user) {
-      setAccess({
-        configured: true,
-        loading: false,
-        user: null,
-        plan: "free",
-        isPro: false,
-        error: userError?.message || null,
-      });
-      return;
-    }
-
-    const { data: entitlement, error: entitlementError } = await supabase
-      .from("coach_access")
-      .select("plan, status")
-      .eq("user_id", userData.user.id)
-      .maybeSingle();
-
-    const isPro = entitlement?.plan === "pro" && entitlement?.status === "active";
-    setAccess({
-      configured: true,
-      loading: false,
-      user: userData.user,
-      plan: isPro ? "pro" : "free",
-      isPro,
-      error: entitlementError?.message || null,
-    });
-  }, []);
+  const [access, setAccess] = useState(() => ({
+    ...emptyCoachAccess(isSupabaseConfigured), loading: isSupabaseConfigured,
+  }));
+  const controller = useRef(null);
 
   useEffect(() => {
-    refresh();
-    if (isLocalDeveloper) return undefined;
-    if (!supabase) return undefined;
+    const instance = createCoachAccessController({ client: supabase, configured: isSupabaseConfigured, onChange: setAccess });
+    controller.current = instance;
+    return () => { instance.dispose(); controller.current = null; };
+  }, []);
 
-    const { data: listener } = supabase.auth.onAuthStateChange(() => {
-      refresh();
-    });
-    return () => listener.subscription.unsubscribe();
-  }, [refresh]);
-
+  const refresh = useCallback(() => controller.current?.refresh(), []);
+  const signOut = useCallback(() => controller.current?.signOut(), []);
   const sendMagicLink = useCallback(async (email) => {
     if (!supabase) throw new Error("Account sign-in is not configured yet.");
     const redirectTo = `${window.location.origin}${window.location.pathname}`;
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: redirectTo },
-    });
-    if (error) throw error;
-  }, []);
-
-  const signOut = useCallback(async () => {
-    if (!supabase) return;
-    const { error } = await supabase.auth.signOut();
+    const { error } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: redirectTo } });
     if (error) throw error;
   }, []);
 

@@ -50,8 +50,9 @@ beforeEach(() => {
       then(resolve, reject) {
         return Promise.resolve().then(() => {
           calls.push({ operation, filters });
-          if (operation === "delete") matching().forEach(row => rows.delete(row.id));
-          return { error: null };
+          const data = matching();
+          if (operation === "delete") data.forEach(row => rows.delete(row.id));
+          return { data, error: null };
         }).then(resolve, reject);
       },
     };
@@ -69,7 +70,7 @@ afterEach(async () => {
 
 test.each([
   ["guest", { user: null, isPro: false }, false],
-  ["Free", { user: { id: "test-user" }, isPro: false }, false],
+  ["Free", { user: { id: "test-user" }, isPro: false }, true],
   ["Pro without login", { user: null, isPro: true }, false],
   ["signed-in Pro", { user: { id: "test-user" }, isPro: true }, true],
 ])("%s selects correct repository and supports favourite Save → Remove → Save again → Library Delete", async (_, access, cloud) => {

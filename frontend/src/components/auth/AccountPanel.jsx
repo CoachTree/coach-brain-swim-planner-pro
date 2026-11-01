@@ -8,8 +8,8 @@ export default function AccountPanel({ access, openSignal = 0 }) {
   const [sending, setSending] = useState(false);
 
   useEffect(() => {
-    if (openSignal > 0) setOpen(true);
-  }, [openSignal]);
+    if (openSignal > 0 || access.logoutPending) setOpen(true);
+  }, [openSignal, access.logoutPending]);
 
   const sendLink = async (event) => {
     event.preventDefault();
@@ -40,7 +40,20 @@ export default function AccountPanel({ access, openSignal = 0 }) {
     return <span className="hidden sm:inline text-xs font-bold text-[#64748B]">Account setup pending</span>;
   }
 
-  const planLabel = access.isPro ? "Coach Brain Pro" : "Free plan";
+  const planLabel = access.logoutPending ? "Sign out pending" : access.error ? "Access check unavailable"
+    : access.isPro && access.accessSource === "founding" ? "Founding Coach · Pro"
+    : access.isPro ? "Coach Brain Pro" : "Free plan";
+  const expiresAt = access.foundingExpiresAt && new Date(access.foundingExpiresAt);
+  const expiryLabel = expiresAt && Number.isFinite(expiresAt.getTime())
+    ? expiresAt.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : null;
+  const accessDescription = access.loading ? "Checking this account’s access…"
+    : access.error ? access.error
+    : access.isPro && access.accessSource === "founding"
+      ? `Your complimentary Founding Coach Pro access is active${expiryLabel ? ` until ${expiryLabel} (your local time)` : ""}. Your saved data stays after the invitation ends.`
+    : access.isPro ? "Your paid Pro access is active on this account."
+    : access.foundingStatus === "expired" ? "Your Founding Coach invitation has ended. This account is now on the Free plan. Your saved data has not been deleted."
+    : access.foundingStatus === "revoked" ? "Your Founding Coach invitation was cancelled. This account is now on the Free plan. Your saved data has not been deleted."
+    : "This account is on the Free plan. Purchased accounts are activated after the receipt is checked.";
   return (
     <div className="relative">
       <button
@@ -49,20 +62,24 @@ export default function AccountPanel({ access, openSignal = 0 }) {
         className="inline-flex items-center gap-2 border border-[#003366] px-3 py-2 text-xs font-bold text-[#003366] hover:bg-[#003366] hover:text-white"
       >
         {access.user ? <UserRound className="h-3.5 w-3.5" /> : <LogIn className="h-3.5 w-3.5" />}
-        {access.loading ? "Checking…" : planLabel}
+        {access.logoutPending && access.loading ? "Signing out…" : access.loading ? "Checking…" : planLabel}
       </button>
 
       {open && (
         <div className="absolute right-0 z-30 mt-2 w-80 border border-[#CBD5E1] bg-white p-4 text-left shadow-xl">
-          {access.user ? (
+          {access.logoutPending ? (
+            <>
+              <p role="alert" className="text-xs leading-relaxed text-[#475569]">{access.error || "Signing out. Account access is locked until sign out completes."}</p>
+              <button type="button" disabled={access.loading} onClick={handleSignOut} className="mt-4 inline-flex items-center gap-2 text-xs font-bold text-[#003366] hover:underline disabled:opacity-60">
+                <LogOut className="h-3.5 w-3.5" /> Retry sign out
+              </button>
+            </>
+          ) : access.user ? (
             <>
               <div className="label-eyebrow">Signed in</div>
               <p className="mt-2 break-all text-sm font-bold text-[#0F172A]">{access.user.email}</p>
-              <p className="mt-2 text-xs leading-relaxed text-[#475569]">
-                {access.isPro
-                  ? "Your Pro access is active on this account."
-                  : "This account is on the Free plan. Purchased accounts are activated after the receipt is checked."}
-              </p>
+              <p role={access.error ? "alert" : undefined} className="mt-2 text-xs leading-relaxed text-[#475569]">{accessDescription}</p>
+              {access.error && <button type="button" onClick={() => access.refresh()} className="mt-3 block text-xs font-bold text-[#003366] hover:underline">Check access again</button>}
               <button type="button" onClick={handleSignOut} className="mt-4 inline-flex items-center gap-2 text-xs font-bold text-[#003366] hover:underline">
                 <LogOut className="h-3.5 w-3.5" /> Sign out
               </button>
@@ -70,6 +87,7 @@ export default function AccountPanel({ access, openSignal = 0 }) {
           ) : (
             <form onSubmit={sendLink}>
               <div className="label-eyebrow">Sign in or create account</div>
+              {access.error && <p role="alert" className="mt-2 text-xs leading-relaxed text-[#475569]">{access.error}</p>}
               <p className="mt-2 text-xs leading-relaxed text-[#475569]">We will email a secure sign-in link. Use the same email address as your purchase.</p>
               <label className="sr-only" htmlFor="account-email">Email address</label>
               <input

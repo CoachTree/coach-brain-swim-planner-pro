@@ -12,7 +12,7 @@ import { Journal } from "@/lib/localStore";
  *     observations, athlete_feedback, fatigue, performance_notes,
  *     injury_concerns, created_at, updated_at }
  */
-export default function JournalPanel({ sessionKey, session, profile }) {
+export default function JournalPanel({ sessionKey, session, profile, enabled = true }) {
   const [open, setOpen] = useState(false);
   const [entry, setEntry] = useState(null);
 
@@ -48,7 +48,7 @@ export default function JournalPanel({ sessionKey, session, profile }) {
   }, [entry]);
 
   const handleSave = () => {
-    if (!entry) return;
+    if (!enabled || !entry) return;
     const saved = Journal.upsert(entry);
     if (!saved) {
       toast.error("Could not save journal entry. Browser storage may be unavailable.");
@@ -59,6 +59,7 @@ export default function JournalPanel({ sessionKey, session, profile }) {
   };
 
   const handleDelete = () => {
+    if (!enabled) return;
     if (entry?.id) {
       Journal.remove(entry.id);
       toast.success("Journal entry removed");
@@ -68,7 +69,7 @@ export default function JournalPanel({ sessionKey, session, profile }) {
 
   return (
     <>
-      <Button
+      {enabled && <Button
         onClick={() => setOpen((v) => !v)}
         data-testid="notes-button"
         className="h-11 rounded-sm bg-white/10 hover:bg-white/20 text-white border border-white/30 font-display font-bold tracking-wide"
@@ -77,10 +78,13 @@ export default function JournalPanel({ sessionKey, session, profile }) {
         <ChevronDown
           className={`h-4 w-4 ml-1 transition-transform ${open ? "rotate-180" : ""}`}
         />
-      </Button>
+      </Button>}
 
       {open && entry && (
-        <div
+        <fieldset
+          disabled={!enabled}
+          hidden={!enabled}
+          inert={!enabled || undefined}
           className="col-span-full bg-white text-[#0F172A] border-t border-white/30 -mx-5 sm:-mx-6 mt-4 px-5 sm:px-6 py-5 rounded-b-sm"
           data-testid="journal-panel"
         >
@@ -182,7 +186,7 @@ export default function JournalPanel({ sessionKey, session, profile }) {
               </Button>
             )}
           </div>
-        </div>
+        </fieldset>
       )}
     </>
   );

@@ -246,7 +246,9 @@ export default function SessionResult({
   favouriteStore = Favourites,
   sessionStore = SavedSessions,
 }) {
-  const [editing, setEditingState] = useState(false);
+  const [editingRequested, setEditingState] = useState(false);
+  // Preserve edit intent during revalidation, but suspend Pro editing immediately.
+  const editing = editingRequested && isPro && !readOnly;
   const [sharing, setSharing] = useState(false);
   const [favouriteId, setFavouriteId] = useState(defaultFavouriteId);
   const [favouritePending, setFavouritePending] = useState(false);
@@ -468,11 +470,12 @@ export default function SessionResult({
               {favouriteId ? "Saved" : "Save"}
             </Button>
           )}
-          {!readOnly && isPro && (
+          {!readOnly && (
             <JournalPanel
               sessionKey={sessionKey}
               session={session}
               profile={profile}
+              enabled={isPro}
             />
           )}
           {!readOnly && isPro && (

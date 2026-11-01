@@ -3,13 +3,13 @@ import React, { act } from "react";
 import { IDBFactory, IDBKeyRange } from "fake-indexeddb";
 import * as performanceStorage from "@/lib/localPerformanceStore";
 import { useCoachAccess } from "@/hooks/useCoachAccess";
-import { Athletes as CloudAthletes } from "@/lib/cloudStore";
+import { Athletes as CloudAthletes, SavedSessions as CloudSessions, Favourites as CloudFavourites } from "@/lib/cloudStore";
 import { createRoot } from "react-dom/client";
 import { jsPDF } from "jspdf";
 import { toast } from "sonner";
 import SwimPlanner from "./SwimPlanner";
 import { generateSession } from "@/lib/sessionGenerator";
-import { Athletes, SavedSessions, Favourites } from "@/lib/localStore";
+import { Athletes, SavedSessions, Favourites, Journal } from "@/lib/localStore";
 import { decodeShare } from "@/lib/shareLink";
 import * as draftLifecycle from "@/lib/sessionDraft";
 
@@ -32,7 +32,7 @@ const tab = async name => {
 const change = async (id, value) => {
   const input = query(id); expect(input).not.toBeNull();
   await act(async () => {
-    const proto = input.tagName === "SELECT" ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+    const proto = input.tagName === "SELECT" ? HTMLSelectElement.prototype : input.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
     Object.getOwnPropertyDescriptor(proto, "value").set.call(input, value);
     input.dispatchEvent(new Event(input.tagName === "SELECT" ? "change" : "input", { bubbles: true }));
   });
@@ -275,7 +275,9 @@ test("Free entry is hidden; account roster selection is explicit and cannot reus
   await act(async () => root.render(<SwimPlanner />)); expect(query("record-results")).toBeNull();
   let resolveRoster; jest.spyOn(CloudAthletes, "list").mockImplementation(() => new Promise(resolve => { resolveRoster = resolve; }));
   useCoachAccess.mockReturnValue({ isPro: true, user: { id: "account-a" }, configured: false });
-  await act(async () => root.render(<SwimPlanner />)); await click("record-results");
+  await act(async () => root.render(<SwimPlanner />));
+  expect(query("session-result-card")).toBeNull();
+  await generate(); await click("record-results");
   expect(query("performance-start").disabled).toBe(true); expect(query("performance-athleteId").options).toHaveLength(1);
   await act(async () => resolveRoster([{ id: "cloud-a", name: "Cloud athlete" }]));
   expect([...query("performance-athleteId").options].map(o => o.value)).toEqual(["", "cloud-a"]);
@@ -329,7 +331,9 @@ test("hotfix: account switch isolates filled confirmation; explicit close/reopen
   await openCloudConfirmation();
   await setPilotAccess({ user: { id: "pilot-account-b" }, loading: true });
   expect(query("performance-athleteId")).toBeNull(); expect(document.querySelector('[role="dialog"]')).toBeNull();
-  await setPilotAccess({ user: { id: "pilot-account-b" } }); await click("record-results");
+  await setPilotAccess({ user: { id: "pilot-account-b" } });
+  expect(query("session-result-card")).toBeNull();
+  await generate(); await click("record-results");
   expect(query("performance-athleteId").value).toBe(""); expect(query("performance-count").value).toBe(""); expect(query("performance-confirmed").checked).toBe(false);
   await change("performance-athleteId", cloudAthleteId); await change("performance-count", "8"); await click("performance-confirmed");
   await act(async () => [...document.querySelector('[role="dialog"]').querySelectorAll("button")].find(b => b.textContent === "Close").click());
@@ -349,16 +353,21 @@ test("explicit cloud selection is suggested but account switches permanently inv
   jest.spyOn(CloudAthletes, "list").mockResolvedValue([{ id: "a", name: "Same name" }]);
   await setPilotAccess(); await change("session-athlete-select", "a"); await generate(); await click("record-results");
   expect(query("performance-athleteId").value).toBe("a");
-  await setPilotAccess({ user: { id: "other-account" } }); await click("record-results");
+  await setPilotAccess({ user: { id: "other-account" } });
+  expect(query("session-result-card")).toBeNull();
+  await generate(); await click("record-results");
   expect(query("performance-athleteId").value).toBe("");
-  await setPilotAccess(); await click("record-results");
+  await setPilotAccess(); await generate(); await click("record-results");
   expect(query("performance-athleteId").value).toBe("");
 });
 
 test("account change during generation cannot lend new provenance to the pending selection", async () => {
   await change("session-athlete-select", "a"); await click("generate-button");
   jest.spyOn(CloudAthletes, "list").mockResolvedValue([{ id: "a", name: "Athlete A" }]);
-  await setPilotAccess(); await tick(); await click("record-results");
+  await setPilotAccess(); await tick();
+  expect(query("session-result-card")).toBeNull();
+  expect(generateSession).not.toHaveBeenCalled();
+  await generate(); await click("record-results");
   expect(query("performance-athleteId").value).toBe("");
 });
 
@@ -376,7 +385,100 @@ test("explicit Exact memory uses cloud identity and is hidden after account swit
   expect(lookup).toHaveBeenCalledWith(expect.objectContaining({ scopeKey: "account:pilot-account-a", athleteRef: { store: "supabase", id: cloudAthleteId }, excludeOccurrenceId: null }));
   expect(document.querySelector('[role="dialog"]').textContent).toContain("No eligible Exact result");
   expect(performanceStore.startRecording).not.toHaveBeenCalled();
-  await setPilotAccess({ user: { id: "other-account" } }); await setPilotAccess(); await click("record-results");
+  await setPilotAccess({ user: { id: "other-account" } }); await setPilotAccess(); await generate(); await click("record-results");
   expect(document.querySelector('[role="dialog"]').textContent).not.toContain("No eligible Exact result");
   expect(lookup).toHaveBeenCalledTimes(1);
+});
+
+test.each([
+  ["checking", { loading: true }],
+  ["expired or revoked", { isPro: false }],
+  ["network failure", { isPro: false, error: "Access unavailable" }],
+])("%s preserves same-account draft and stored work without browser-local fallback", async (_, accessChange) => {
+  jest.spyOn(CloudAthletes, "list").mockResolvedValue([{ id: "account-athlete", name: "Account private athlete" }]);
+  const cloudSave = jest.spyOn(CloudSessions, "upsert").mockResolvedValue({ id: "cloud-saved" });
+  const favouriteSave = jest.spyOn(CloudFavourites, "upsert").mockResolvedValue({ id: "cloud-favourite" });
+  await setPilotAccess(); await change("session-athlete-select", "account-athlete"); await generate(); await editedLine();
+  await setPilotAccess(accessChange);
+  expect(query("session-result-card").textContent).toContain("Coach revised work");
+  expect(query("edit-item-main_set-0")).toBeNull();
+  expect(query("save-session-button")).toBeNull(); expect(query("favourite-button")).toBeNull();
+  await tab("Session History"); expect(query("session-history-page")).toBeNull();
+  expect(SavedSessions.list()).toEqual([]); expect(Favourites.list()).toEqual([]);
+  expect(cloudSave).not.toHaveBeenCalled(); expect(favouriteSave).not.toHaveBeenCalled();
+  await setPilotAccess(); await tab("Session Builder");
+  expect(query("session-athlete-select").value).toBe("account-athlete");
+  await click("save-session-button"); expect(cloudSave).toHaveBeenCalledTimes(1);
+  expect(cloudSave.mock.calls[0][0].session.main_set.items[0]).toBe("Coach revised work");
+  expect(cloudSave.mock.calls[0][0].profile.athleteName).toBe("Account private athlete");
+  expect(SavedSessions.list()).toEqual([]);
+});
+
+test("account switch clears draft, selected athlete, and pending replacement; late roster cannot reach the new account", async () => {
+  let resolveOldRoster;
+  const roster = jest.spyOn(CloudAthletes, "list").mockResolvedValue([{ id: "private-a", name: "Private athlete A" }]);
+  await setPilotAccess(); await change("session-athlete-select", "private-a"); await generate(); await editedLine();
+  await click("generate-another-button");
+  roster.mockImplementationOnce(() => new Promise(resolve => { resolveOldRoster = resolve; }));
+  await setPilotAccess({ loading: true }); await setPilotAccess();
+  roster.mockResolvedValue([{ id: "private-b", name: "Private athlete B" }]);
+  await setPilotAccess({ user: { id: "account-b" } });
+  expect(query("session-result-card")).toBeNull(); expect(query("replace-draft")).toBeNull();
+  expect(query("session-athlete-select").value).toBe("");
+  await act(async () => resolveOldRoster([{ id: "private-a", name: "Private athlete A" }]));
+  expect(container.textContent).not.toContain("Private athlete A");
+  await generate();
+  expect(query("session-result-card").textContent).not.toContain("Private athlete A");
+  await setPilotAccess(); expect(query("session-result-card")).toBeNull();
+});
+
+test.each(["Athletes", "Coach Library", "Session History", "Season Planner"])("%s stays mounted but cannot be used during same-account checks, errors, or expiry", async view => {
+  jest.spyOn(CloudAthletes, "list").mockResolvedValue([]);
+  jest.spyOn(CloudFavourites, "list").mockResolvedValue([]);
+  jest.spyOn(CloudSessions, "list").mockResolvedValue([]);
+  await setPilotAccess(); await tab(view);
+  if (view === "Athletes") {
+    await click("athlete-add-button"); await change("athlete-name", "Unsaved private athlete");
+  }
+  if (view === "Coach Library") {
+    await click("library-tab-test-sets"); await click("test-set-create"); await change("test-set-name", "Unsaved test set");
+  }
+  const panel = query("pro-workspace").firstElementChild;
+  for (const state of [{ loading: true }, { isPro: false, loading: true }, { isPro: false, error: "Offline" }, { isPro: false }]) {
+    await setPilotAccess(state);
+    expect(query("pro-workspace").firstElementChild).toBe(panel);
+    expect(query("pro-workspace").disabled).toBe(true);
+    expect(query("pro-workspace").hasAttribute("inert")).toBe(true);
+    expect(query("pro-workspace").hidden).toBe(!state.loading);
+    if (view === "Athletes") {
+      expect(query("athlete-name").value).toBe("Unsaved private athlete");
+      expect(query("athlete-save-button").matches(":disabled")).toBe(true);
+    }
+    if (view === "Coach Library") {
+      expect(query("test-set-name").value).toBe("Unsaved test set");
+      expect(query("test-set-save").matches(":disabled")).toBe(true);
+    }
+    await setPilotAccess();
+    expect(query("pro-workspace").firstElementChild).toBe(panel);
+    expect(query("pro-workspace").disabled).toBe(false);
+  }
+  await setPilotAccess({ user: { id: "different-account" } });
+  expect(panel.isConnected).toBe(false);
+  expect(query("athlete-name")).toBeNull(); expect(query("test-set-name")).toBeNull();
+});
+
+test("unsaved journal notes survive access checks but cannot be saved until access returns", async () => {
+  jest.spyOn(CloudAthletes, "list").mockResolvedValue([]);
+  await setPilotAccess(); await generate(); await click("notes-button");
+  await change("journal-observations", "Unsaved notes for this account");
+  const journal = query("journal-panel");
+  for (const state of [{ loading: true }, { isPro: false, error: "Offline" }, { isPro: false }]) {
+    await setPilotAccess(state);
+    expect(query("journal-panel")).toBe(journal); expect(journal.hidden).toBe(true);
+    expect(query("journal-observations").value).toBe("Unsaved notes for this account");
+    expect(query("journal-save").matches(":disabled")).toBe(true);
+    await click("journal-save"); expect(Journal.list()).toEqual([]);
+    await setPilotAccess(); expect(journal.hidden).toBe(false);
+  }
+  await click("journal-save"); expect(Journal.list()[0].observations).toBe("Unsaved notes for this account");
 });

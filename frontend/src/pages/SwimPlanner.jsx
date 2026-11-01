@@ -101,6 +101,29 @@ function ProGate({ feature, access, onOpenAccount }) {
 
 export default function SwimPlanner() {
   const access = useCoachAccess();
+  // Identity changes discard in-memory UI state; entitlement checks for the same
+  // account keep the current draft. Neither transition deletes persisted work.
+  return <AccountPlanner key={access.user?.id || "guest"} access={access} />;
+}
+
+function AccountPlanner({ access }) {
+  const canUsePro = access.isPro && !access.loading && !access.error;
+  const accessReady = useRef(canUsePro);
+  accessReady.current = canUsePro;
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  const accountId = access.user?.id;
+  const cloudStores = useMemo(() => {
+    const isActive = () => mounted.current && accessReady.current;
+    return accountId ? {
+      sessions: CloudSessions.forUser(accountId, isActive),
+      athletes: CloudAthletes.forUser(accountId, isActive),
+      favourites: CloudFavourites.forUser(accountId, isActive),
+    } : null;
+  }, [accountId]);
   const [activeTab, setActiveTab] = useState("session");
   const [accountPanelOpenSignal, setAccountPanelOpenSignal] = useState(0);
   const [athletes, setAthletes] = useState([]);
@@ -125,12 +148,14 @@ export default function SwimPlanner() {
   const [replacementRequest, setReplacementRequest] = useState(null);
   const generationInFlight = useRef(false);
   const freeTabs = new Set(["session", "community"]);
-  const sessionStore = selectSessionStore(access, LocalSessions, CloudSessions);
-  const sessionScope = `${access.user?.id || "guest"}:${access.isPro ? "pro" : "free"}`;
-  const athleteStore = access.isPro && access.user ? CloudAthletes : LocalAthletes;
-  const favouriteStore = selectFavouriteStore(access, LocalFavourites, CloudFavourites);
-  const performanceScope = access.isPro && access.user ? `account:${access.user.id}` : "device:browser-local";
-  const recordingStore = access.isPro && access.user ? "supabase" : "local";
+  const openedProTabs = useRef(new Set());
+  if (canUsePro) openedProTabs.current.add(activeTab);
+  const sessionStore = selectSessionStore(access, LocalSessions, cloudStores?.sessions);
+  const sessionScope = access.user?.id || "guest";
+  const athleteStore = access.user ? cloudStores.athletes : LocalAthletes;
+  const favouriteStore = selectFavouriteStore(access, LocalFavourites, cloudStores?.favourites);
+  const performanceScope = access.user ? `account:${access.user.id}` : "device:browser-local";
+  const recordingStore = access.user ? "supabase" : "local";
   // A boundary permanently invalidates earlier selections, even after switching back.
   const selectionScope = useRef({ scopeKey: performanceScope, store: recordingStore, version: 0 });
   if (selectionScope.current.scopeKey !== performanceScope || selectionScope.current.store !== recordingStore) {
@@ -139,8 +164,8 @@ export default function SwimPlanner() {
   const rosterScopeRef = useRef(performanceScope);
   rosterScopeRef.current = performanceScope;
   const performanceAthletes = athleteRosterScope === performanceScope ? athletes.filter(a => /^[A-Za-z0-9_-]{1,128}$/.test(String(a.id || ""))) : [];
-  const recorder = usePerformanceRecorder({ scopeKey: performanceScope, athleteStore: access.isPro && access.user ? "supabase" : "local",
-    athletes: performanceAthletes, enabled: access.isPro, checkingAccess: access.loading });
+  const recorder = usePerformanceRecorder({ scopeKey: performanceScope, athleteStore: recordingStore,
+    athletes: performanceAthletes, enabled: access.isPro && !access.error, checkingAccess: access.loading });
   const performanceOpen = recorder.state.phase !== "closed";
   const performanceReturnFocus = useRef(null);
   const openRecorder = block => {
@@ -155,6 +180,7 @@ export default function SwimPlanner() {
   };
 
   useEffect(() => {
+    if (accountId && !canUsePro) return undefined;
     let active = true;
     Promise.resolve(athleteStore.list())
       .then((records) => {
@@ -167,16 +193,16 @@ export default function SwimPlanner() {
     return () => {
       active = false;
     };
-  }, [athleteStore, performanceScope]);
+  }, [athleteStore, performanceScope, accountId, canUsePro]);
 
   const refreshAthletes = async () => {
     const records = await athleteStore.list();
-    if (rosterScopeRef.current === performanceScope) { setAthletes(records); setAthleteRosterScope(performanceScope); }
+    if (mounted.current && rosterScopeRef.current === performanceScope) { setAthletes(records); setAthleteRosterScope(performanceScope); }
     return records;
   };
 
   const selectTab = (key) => {
-    if (!access.isPro && !freeTabs.has(key)) {
+    if (!canUsePro && !freeTabs.has(key)) {
       setActiveTab("upgrade");
       toast.info("This is a Coach Brain Pro feature");
       return;
@@ -258,7 +284,7 @@ team: athletes.find(
   const handleLoadSavedSession = (saved) => requestReplacement({ type: "load", saved, favouriteId: null });
 
   const executeReplacement = async (request) => {
-    if (generationInFlight.current) return;
+    if (!mounted.current || generationInFlight.current) return;
     if (request.type === "load") {
       loadDraft(request.saved.session, request.saved.profile || {}, {}, request.favouriteId);
       restoreProfile(request.saved.profile);
@@ -271,6 +297,7 @@ team: athletes.find(
     setLoading(true);
     // Retain the current draft until the replacement has been generated successfully.
     await new Promise((resolve) => setTimeout(resolve, 60));
+    if (!mounted.current) return;
     try {
       const data = generateSession(request.input);
       loadDraft(data, request.profile, { equipment: request.input.equipment, paceTarget: request.input.paceTarget,
@@ -393,6 +420,10 @@ team: athletes.find(
       </header>
 
       <main className="max-w-2xl mx-auto w-full px-4 sm:px-6 py-10 sm:py-14">
+        {access.user && !canUsePro && <p role="status" className="mb-6 border border-[#CBD5E1] p-4 text-sm text-[#475569]">
+          {access.loading ? "Checking account access…" : access.error ? "Account access could not be verified. Please retry from your account." : "Pro access is inactive."}
+          {" "}Your saved account data remains stored. The current session draft stays here while you verify access.
+        </p>}
         <div className="mb-8 grid grid-cols-2 sm:grid-cols-3 border border-[#CBD5E1] rounded-sm overflow-hidden">
           {[
             ["session", "Session Builder", false],
@@ -405,6 +436,7 @@ team: athletes.find(
             <button
               key={key}
               type="button"
+              disabled={access.loading && isPro}
               onClick={() => selectTab(key)}
               data-active={activeTab === key}
               className="px-3 py-3 text-xs sm:text-sm font-display font-black tracking-wide border-r last:border-r-0 border-[#CBD5E1] data-[active=true]:bg-[#003366] data-[active=true]:text-white text-[#475569] hover:text-[#003366]"
@@ -435,7 +467,7 @@ team: athletes.find(
         <section className="space-y-10">
           <div data-testid="athlete-session-selector">
             <label className="label-eyebrow block mb-3" htmlFor="session-athlete">01 · Athlete</label>
-            {athletes.length > 0 ? (
+            {canUsePro && athleteRosterScope === performanceScope && athletes.length > 0 ? (
               <select
                 id="session-athlete"
                 value={selectedAthleteId}
@@ -593,7 +625,7 @@ team: athletes.find(
               defaultFavouriteId={draft.favouriteId}
               onFavouriteChange={setFavouriteId}
               onRecordResults={!loading && recorder.state.recording?.performance.status !== "draft" ? openRecorder : undefined}
-              isPro={access.isPro}
+              isPro={canUsePro}
               sessionStore={sessionStore}
               favouriteStore={favouriteStore}
             />
@@ -617,13 +649,15 @@ team: athletes.find(
           </>
         )}
 
-        {activeTab === "season" && access.isPro && <SeasonPlanner />}
+        <fieldset disabled={!canUsePro} inert={!canUsePro || undefined} hidden={!canUsePro && !access.loading} className="min-w-0" aria-busy={Boolean(access.loading)} data-testid="pro-workspace">
+        {activeTab === "season" && openedProTabs.current.has("season") && <SeasonPlanner />}
 
-        {activeTab === "library" && access.isPro && <CoachLibrary favouriteStore={favouriteStore} onLoadFavourite={handleLoadFavourite} />}
+        {activeTab === "library" && openedProTabs.current.has("library") && <CoachLibrary favouriteStore={favouriteStore} onLoadFavourite={handleLoadFavourite} />}
 
-        {activeTab === "athletes" && access.isPro && <AthleteProfile athleteStore={athleteStore} selectedAthleteId={selectedAthleteId} onAthletesChange={refreshAthletes} onSelectAthlete={(athlete) => { refreshAthletes().then(() => handleSelectAthlete(athlete)).catch(() => toast.error("Could not refresh athletes.")); }} />}
+        {activeTab === "athletes" && openedProTabs.current.has("athletes") && <AthleteProfile athleteStore={athleteStore} selectedAthleteId={selectedAthleteId} onAthletesChange={refreshAthletes} onSelectAthlete={(athlete) => { refreshAthletes().then(() => { if (mounted.current && accessReady.current) handleSelectAthlete(athlete); }).catch(() => toast.error("Could not refresh athletes.")); }} />}
 
-        {activeTab === "history" && <SessionHistory key={sessionScope} sessionStore={sessionStore} onOpen={handleLoadSavedSession} />}
+        {activeTab === "history" && openedProTabs.current.has("history") && <SessionHistory key={sessionScope} sessionStore={sessionStore} onOpen={handleLoadSavedSession} />}
+        </fieldset>
 
         {activeTab === "community" && <CommunityHub />}
 
