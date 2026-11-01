@@ -1,6 +1,9 @@
 -- REVIEW ONLY: additive migration for the audited production schema.
 -- Apply only after explicit production approval. Never rewrites coach_access.
 begin;
+-- Fail rather than wait indefinitely for a busy production table.
+set local lock_timeout = '5s';
+set local statement_timeout = '30s';
 
 create schema if not exists coach_private;
 revoke all on schema coach_private from public, anon, authenticated;

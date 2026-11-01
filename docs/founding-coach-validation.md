@@ -54,3 +54,31 @@ See [program and approval runbook](founding-coach-program.md) and
 [current production audit](founding-coach-audit.md) for rollout order and remaining
 approvals. Merging `main` triggers production Pages and therefore requires explicit
 deployment approval.
+
+## Read-only rollout preflight — 2026-11-01
+
+PR #7 remained open, draft and mergeable, with no new review comments. Its
+original head `9300a2faaa7859f5093a1c715467fbc59012328a` passed all three CI
+jobs. Main remained `6e3bfc727d5da7766d0fe4d842fd0bc1644e5bdd`.
+
+Fresh production catalog checks found no drift in the six existing tables,
+columns, constraints, indexes, policies, or effective privileges. Invitation
+objects are still absent; migration and Edge Function inventories remain empty.
+No target-table lock waits were observed at the snapshot. This is not a guarantee
+of lock availability at a later apply time. The existing Security Advisor finding
+and PostgreSQL 17.6/UTC configuration are unchanged. No customer rows were read.
+
+Two rollout-preparation fixes were added after the initial local validation:
+- Pages build now uses Node 22, matching the successful CI runtime and the locked
+  Supabase 2.111.0 packages' `node >=22.0.0` requirement. The deployment workflow's
+  triggers, permissions, and production configuration are unchanged.
+- The migration sets a five-second lock timeout and a thirty-second per-statement
+  timeout inside its transaction. A busy-table timeout aborts the migration
+  instead of waiting indefinitely.
+
+These changes must pass the updated PR CI before approval. No production apply,
+merge, deployment, invitation grant, commercial change, or message was performed.
+No existing hosted development branch was available. Hosted Auth/PostgREST tests
+and recoverable-backup verification remain outstanding. Before an approved apply,
+confirm a current backup and recheck schema/locks; after apply, verify database
+policies before releasing the frontend and granting a specifically approved user.
