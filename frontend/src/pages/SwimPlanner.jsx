@@ -92,9 +92,9 @@ function ProGate({ feature, access, onOpenAccount }) {
         rel="noreferrer"
         className="mt-6 inline-flex items-center gap-2 bg-[#003366] px-5 py-3 text-sm font-bold text-white hover:bg-[#002244]"
       >
-        <Sparkles className="h-4 w-4" /> Founding Coach Early Access · US$39
+        <Sparkles className="h-4 w-4" /> Founding Coach Lifetime · US$19
       </a>
-      <p className="mt-3 text-xs text-[#64748B]">First 25 coaches · regular price US$59</p>
+      <p className="mt-3 text-xs text-[#64748B]">One payment. No subscription. Available to the first 10 Founding Coaches. Check availability and the final checkout total on Gumroad.</p>
     </section>
   );
 }

@@ -24,10 +24,12 @@ core product.
 
 ## Low-Budget Business Model
 
-The simplest first version is a one-time license or annual access sold through
-your chosen checkout/file-delivery service.
+The current offer is [Coach Brain Pro · Founding Coach Lifetime](https://coachtree.gumroad.com/l/coach-brain-pro):
+US$19 for lifetime access, one payment with no subscription, available to the
+first 10 Founding Coaches. Check availability and the final checkout total on
+Gumroad. Purchased accounts are activated after the receipt is checked.
 
-Recommended launch shape:
+Original low-budget launch guidance:
 
 1. Build the app with your brand name and screenshots.
 2. Host the demo/public app as a static site.
