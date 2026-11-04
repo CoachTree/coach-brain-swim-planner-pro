@@ -94,6 +94,36 @@ test("all equal times have zero drift and one missing time suppresses it", () =>
   p.reps[3].time = null;
   expect(metrics(p)).toMatchObject({ completionPercentage: 100, timingCoveragePercentage: 75, secondHalfDriftSeconds: null });
 });
+test("fractional-hundredth half means and drift use independently computed values", () => {
+  const m = metrics(performance([60.01, 60.02, 60.04, 60.08]));
+  expect(m.firstHalfAverageSeconds).toBeCloseTo(60.015, 10);
+  expect(m.secondHalfAverageSeconds).toBeCloseTo(60.06, 10);
+  expect(m.secondHalfDriftSeconds).toBeCloseTo(0.045, 10);
+});
+test("odd fractional set excludes the middle rep from halves but keeps it in the average", () => {
+  const m = metrics(performance([60.01, 60.02, 70, 60.04, 60.07]));
+  expect(m.firstHalfAverageSeconds).toBeCloseTo(60.015, 10);
+  expect(m.secondHalfAverageSeconds).toBeCloseTo(60.055, 10);
+  expect(m.secondHalfDriftSeconds).toBeCloseTo(0.04, 10);
+  expect(m.averageSeconds).toBeCloseTo(62.028, 10);
+});
+test("valid four-rep set across the 59.99/60.00 second boundary", () => {
+  const m = metrics(performance([59.98, 59.99, "1:00.00", "1:00.01"]));
+  expect(m).toMatchObject({ driftEligible: true, trendEligible: true, bestSeconds: 59.98 });
+  expect(m.averageSeconds).toBeCloseTo(59.995, 10);
+  expect(m.firstHalfAverageSeconds).toBeCloseTo(59.985, 10);
+  expect(m.secondHalfAverageSeconds).toBeCloseTo(60.005, 10);
+  expect(m.secondHalfDriftSeconds).toBeCloseTo(0.02, 10);
+});
+test("missing planned times plus added fast reps do not inflate averages, coverage or completion", () => {
+  const p = performance([60, 60, 60, 60, null, null, null, null]);
+  [10, 11].forEach((s, i) => p.reps.push({ ...p.reps[0], repIndex: 8 + i, plannedRepIndex: null, time: parsePerformanceTime(s).value }));
+  const m = metrics(p);
+  expect(m).toMatchObject({ plannedRepCount: 8, addedRepCount: 2, timedRepCount: 4, completionCount: 8, completionPercentage: 100,
+    timingCoveragePercentage: 50, averageSeconds: 60, bestSeconds: 60, firstHalfAverageSeconds: null, secondHalfDriftSeconds: null,
+    driftEligible: false, trendEligible: false });
+  expect(m.trendIneligibilityReasons).toEqual(expect.arrayContaining(["added_reps", "incomplete_timing"]));
+});
 test("abandoned recorded times are descriptive, not an ordinary trend", () => {
   const p = performance(); p.status = "abandoned"; p.reps = p.reps.slice(0, 4);
   expect(metrics(p)).toMatchObject({ completionCount: 4, averageSeconds: 67.4, trendEligible: false, secondHalfDriftSeconds: null });
